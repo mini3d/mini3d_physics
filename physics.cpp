@@ -106,6 +106,8 @@ struct Contact {
     float impulse[NORMALS_COUNT];
     float mass[NORMALS_COUNT];
     float correction;
+    
+    float isStatic;
 };
 
 
@@ -541,86 +543,11 @@ void polygonPolygonClipping(vector<ClipPoint> &subject, vector<ClipPoint> &refer
     }
 }
 
-size_t findFace(const Hull &hull, const Vec3 &normal) {
-    auto &faces = hull.faces;
-    auto it = max_element(faces.begin(), faces.end(),
-            [&](const Face &a, const Face &b) { return a.normal.Dot(normal) > b.normal.Dot(normal); });
-    return (size_t)(it - faces.begin());
-}
-
-void doContacts(Manifold &manifold) {
+void reduceContacts(const Manifold &manifold, const Vec3 &normal, const Face &faceA, const Face &faceB, vector<ClipPoint> &clipPoints, vector<ClipPoint> &clipPointsA) {
 
     Body &a = *manifold.body[FIRST];
     Body &b = *manifold.body[SECOND];
 
-    size_t contactsCount = 0;
-    array<Contact, 8> contacts;
-
-    Vec3 axis = manifold.axis;
-    
-    Simplex s = manifold.simplex;
-    doGJK(a.transform, b.transform, a.hull, b.hull, s, axis);
-    SupportPoint sp = s[0];
-    
-    if (s.count == 4) {
-        doEPA(a.transform, b.transform, a.hull, b.hull, s);
-        axis = faceNormal(s[0].p, s[1].p, s[2].p).Dir(b.transform.pos - a.transform.pos);
-        sp = s[0];
-    }
-
-    if (s.count == 4) {
-        sp = findSeparatingAxis(a.transform, b.transform, a.hull, b.hull, axis);
-    }
-    
-    if (!paused) {
-        manifold.axis = axis;
-        manifold.simplex = s;
-    }
-    
-    axis.Normalize();
-    //axis = Vec3(0,0,1).Dir(b.transform.pos - a.transform.pos);
-    
-    // find the collision plane in between the faces
-    float distance = (-sp.p).Dot(axis);
-    Vec3 center = a.transform * a.hull.vertices[sp.i] + 0.5f * distance * axis;
-    Face clipPlane = { center, axis };
-
-    // Face of each object that is the most in the normal direction of the simplex
-    size_t faceIndexA = findFace(a.hull, a.transform.rotateInv(-axis));
-    size_t faceIndexB = findFace(b.hull, b.transform.rotateInv(axis));
-
-    Face &faceA = a.hull.faces[faceIndexA];
-    Face &faceB = b.hull.faces[faceIndexB];
-
-    Vec3 normal = axis;
-    Vec3 tangent = Geometry::getTangent(normal);
-    Vec3 bitangent = normal.Cross(tangent);
-
-    // Create the polygon of face A in the collision plane P
-    vector<ClipPoint> clipPointsA;
-    clipPointsA.reserve(10);
-    vector<ClipPoint> clipPointsB;
-    clipPointsB.reserve(10);
-    generateClipPointsFromFace(clipPointsA, a, clipPlane, faceIndexA);
-    generateClipPointsFromFace(clipPointsB, b, clipPlane, faceIndexB);
-
-    polygonPolygonClipping(clipPointsA, clipPointsB, clipPlane);
-
-    for(auto it = clipPointsA.begin(); it != clipPointsA.end(); ) {
-        Vec3 posA = it->p - (it->p - a.transform * faceA.pos).Dot(a.transform.rotate(faceA.normal)) * a.transform.rotate(faceA.normal) + Physics::COLLISION_OFFSET * normal;
-        Vec3 posB = it->p - (it->p - b.transform * faceB.pos).Dot(b.transform.rotate(faceB.normal)) * b.transform.rotate(faceB.normal) - Physics::COLLISION_OFFSET * normal;
-
-        float distance = -(posB - posA).Dot(normal);
-        if (distance < 0) {
-            it = clipPointsA.erase(it);
-        } else {
-            it++;
-        }
-    }
-
-    // Clip point reduction
-    vector<ClipPoint> clipPoints;
-    
     // Get depest point
     if (clipPointsA.size() > 0) {
         ClipPoint* best = nullptr;
@@ -705,6 +632,104 @@ void doContacts(Manifold &manifold) {
             clipPoints.push_back(*best);
         }
     }
+}
+
+size_t findFace(const Hull &hull, const Vec3 &normal) {
+    auto &faces = hull.faces;
+    auto it = max_element(faces.begin(), faces.end(),
+            [&](const Face &a, const Face &b) { return a.normal.Dot(normal) > b.normal.Dot(normal); });
+    return (size_t)(it - faces.begin());
+}
+
+void doContacts(Manifold &manifold) {
+
+/*
+    if (manifold.contactsCount == 4) {
+        bool allStatic = true;
+
+        for (int i = 0; i < manifold.contactsCount; ++i) {
+            Contact &contact = manifold.contacts[i];
+            if (!contact.isStatic) {
+                allStatic = false;
+            }
+        }
+        
+        if (allStatic) {
+            return;
+        }
+    }
+*/
+    Body &a = *manifold.body[FIRST];
+    Body &b = *manifold.body[SECOND];
+
+    size_t contactsCount = 0;
+    array<Contact, 8> contacts;
+
+    Vec3 axis = manifold.axis;
+    
+    Simplex s = manifold.simplex;
+    doGJK(a.transform, b.transform, a.hull, b.hull, s, axis);
+    SupportPoint sp = s[0];
+    
+    if (s.count == 4) {
+        doEPA(a.transform, b.transform, a.hull, b.hull, s);
+        axis = faceNormal(s[0].p, s[1].p, s[2].p).Dir(b.transform.pos - a.transform.pos);
+        sp = s[0];
+    }
+
+    if (s.count == 4) {
+        sp = findSeparatingAxis(a.transform, b.transform, a.hull, b.hull, axis);
+    }
+    
+    if (!paused) {
+        manifold.axis = axis;
+        manifold.simplex = s;
+    }
+    
+    axis.Normalize();
+    //axis = Vec3(0,0,1).Dir(b.transform.pos - a.transform.pos);
+    
+    // find the collision plane in between the faces
+    float distance = (-sp.p).Dot(axis);
+    Vec3 center = a.transform * a.hull.vertices[sp.i] + 0.5f * distance * axis;
+    Face clipPlane = { center, axis };
+
+    // Face of each object that is the most in the normal direction of the simplex
+    size_t faceIndexA = findFace(a.hull, a.transform.rotateInv(-axis));
+    size_t faceIndexB = findFace(b.hull, b.transform.rotateInv(axis));
+
+    Face &faceA = a.hull.faces[faceIndexA];
+    Face &faceB = b.hull.faces[faceIndexB];
+
+    Vec3 normal = axis;
+    Vec3 tangent = Geometry::getTangent(normal);
+    Vec3 bitangent = normal.Cross(tangent);
+
+    // Create the polygon of face A in the collision plane P
+    vector<ClipPoint> clipPointsA;
+    clipPointsA.reserve(10);
+    vector<ClipPoint> clipPointsB;
+    clipPointsB.reserve(10);
+    generateClipPointsFromFace(clipPointsA, a, clipPlane, faceIndexA);
+    generateClipPointsFromFace(clipPointsB, b, clipPlane, faceIndexB);
+
+    polygonPolygonClipping(clipPointsA, clipPointsB, clipPlane);
+
+    for(auto it = clipPointsA.begin(); it != clipPointsA.end(); ) {
+        Vec3 posA = it->p - (it->p - a.transform * faceA.pos).Dot(a.transform.rotate(faceA.normal)) * a.transform.rotate(faceA.normal) + Physics::COLLISION_OFFSET * normal;
+        Vec3 posB = it->p - (it->p - b.transform * faceB.pos).Dot(b.transform.rotate(faceB.normal)) * b.transform.rotate(faceB.normal) - Physics::COLLISION_OFFSET * normal;
+
+        float distance = -(posB - posA).Dot(normal);
+        if (distance < 0) {
+            it = clipPointsA.erase(it);
+        } else {
+            it++;
+        }
+    }
+
+    // Clip point reduction
+    vector<ClipPoint> clipPoints;
+    reduceContacts(manifold, normal, faceA, faceB, clipPoints, clipPointsA);
 
     for (auto & cp : clipPoints) {
         Contact &contact = contacts[contactsCount++];
@@ -736,6 +761,7 @@ void doContacts(Manifold &manifold) {
         contact.impulse[TANGENT] = 0.0f;
         contact.impulse[BINORMAL] = 0.0f;
         contact.correction = 0;
+        contact.isStatic = false;
 
         size_t bestIndex = -1;
         float bestDistance = FLT_MAX;
@@ -752,12 +778,20 @@ void doContacts(Manifold &manifold) {
             }
         }
 
-        if (bestIndex != -1 && bestDistance < 0.01f) {
+        if (bestIndex != -1 && bestDistance < 0.05f) {
             const Contact &oldContact = manifold.contacts[bestIndex];
             contact.impulse[NORMAL] = oldContact.impulse[NORMAL];
             contact.impulse[TANGENT] = oldContact.impulse[TANGENT];
             contact.impulse[BINORMAL] = oldContact.impulse[BINORMAL];
             contact.correction = oldContact.correction;
+            
+            if (oldContact.isStatic) {
+                contact.pos[FIRST] = oldContact.pos[FIRST];
+                contact.pos[SECOND] = oldContact.pos[SECOND];
+                contact.pos0[FIRST] = oldContact.pos0[FIRST];
+                contact.pos0[SECOND] = oldContact.pos0[SECOND];
+                contact.isStatic = oldContact.isStatic;
+            }
         } else {
             printf("no match: %p\n", &cp);
         }
@@ -832,7 +866,7 @@ void solveVelocities(Manifold &manifold, size_t iteration, float timeStep) {
         // Tangent and binormal
         // TODO: Apply max friction to resultant vector of normal and bitangent friction (can't apply componentwise like we do now!)
 
-
+        bool isStatic = true;
         for (int n = TANGENT; n <= BINORMAL; ++n) {
             float maxFriction = contact.friction * contact.impulse[NORMAL];
             float oldImpulse = contact.impulse[n];
@@ -844,11 +878,17 @@ void solveVelocities(Manifold &manifold, size_t iteration, float timeStep) {
 
             float sum = impulse + contact.impulse[n];
             float clampedImpulse = max(min(sum, maxFriction), -maxFriction);
+            
+            if (abs(clampedImpulse) < abs(sum)) {
+                isStatic = false;
+            }
 
             contact.impulse[n] = clampedImpulse * 0.99f;
             float delta = clampedImpulse - oldImpulse;
             applyImpulse(a, b, delta, contact.n[n], contact.inertia[FIRST][n], contact.inertia[SECOND][n]);
         }
+        
+        contact.isStatic = isStatic;
 
         // Normal
         // TODO: There is something rotten here. Stacking does not work!
@@ -873,7 +913,7 @@ void preSolvePosition(Manifold &manifold) {
     size_t n = NORMAL;
     for (int i = 0; i < manifold.contactsCount; ++i) {
         auto &contact = manifold.contacts[i];
-        
+
         float correction = contact.correction;
 
         manifold.body[FIRST]->transform.pos -= contact.n[n] * correction * manifold.body[FIRST]->invMass;
@@ -881,7 +921,6 @@ void preSolvePosition(Manifold &manifold) {
 
         manifold.body[FIRST]->transform.rot = 0.5f * Ternion(-correction * contact.inertia[FIRST][NORMAL]) * manifold.body[FIRST]->transform.rot;
         manifold.body[SECOND]->transform.rot = 0.5f * Ternion(correction * contact.inertia[SECOND][NORMAL]) * manifold.body[SECOND]->transform.rot;
-
     }
 }
 
@@ -891,12 +930,36 @@ void solvePosition(Manifold &manifold) {
     for (int i = 0; i < manifold.contactsCount; ++i) {
         auto &contact = manifold.contacts[i];
 
+        if (contact.isStatic) {
+            for (int n = TANGENT; n <= BINORMAL; ++n) {
+                auto &contact = manifold.contacts[i];
+
+                Vec3 dRel = (manifold.body[SECOND]->transform * contact.pos0[SECOND]) - (manifold.body[FIRST]->transform * contact.pos0[FIRST]);
+                float distance = dRel.Dot(contact.n[n]);
+                const float targetDistance = 0.0f;
+
+                float correction = (targetDistance - distance) * contact.mass[n] * 0.5f;
+                
+                manifold.body[FIRST]->transform.pos -= contact.n[n] * correction * manifold.body[FIRST]->invMass;
+                manifold.body[SECOND]->transform.pos += contact.n[n] * correction * manifold.body[SECOND]->invMass;
+
+                manifold.body[FIRST]->transform.rot = 0.5f * Ternion(-correction * contact.inertia[FIRST][n]) * manifold.body[FIRST]->transform.rot;
+                manifold.body[SECOND]->transform.rot = 0.5f * Ternion(correction * contact.inertia[SECOND][n]) * manifold.body[SECOND]->transform.rot;
+            }
+        }
+
         Vec3 dRel = (manifold.body[SECOND]->transform * contact.pos0[SECOND]) - (manifold.body[FIRST]->transform * contact.pos0[FIRST]);
         float distance = dRel.Dot(contact.n[n]);
+        float gravityDistance = distance * contact.n[n].Dot(Vec3(0, 0, -1));
         const float targetDistance = -Physics::SLOP;
 
-        float correction = (targetDistance - distance) * contact.mass[NORMAL];
-        float clampedCorrection = max(correction, 0.0f);
+        float correction = (targetDistance - distance) * contact.mass[NORMAL] * 0.5f;
+        float clampedCorrection;
+        if (contact.isStatic) {
+            clampedCorrection = correction;
+        } else {
+            clampedCorrection = max(correction, 0.0f);
+        }
         
         manifold.body[FIRST]->transform.pos -= contact.n[n] * clampedCorrection * manifold.body[FIRST]->invMass;
         manifold.body[SECOND]->transform.pos += contact.n[n] * clampedCorrection * manifold.body[SECOND]->invMass;
