@@ -26,7 +26,7 @@ public:
 static constexpr float GRAVITY = 0.004f;
 
 // FEEATURE SWITCHES
-static const bool ENABLE_SLEEPING = false;
+static const bool ENABLE_SLEEPING = true;
 
 // COLLISION DETECTION
 static constexpr float COLLISION_EPSILON = 0.01f; // Contacts will be calculated within 1 mm
@@ -34,8 +34,8 @@ static constexpr float COLLISION_EPSILON_SQUARED = COLLISION_EPSILON * COLLISION
 static constexpr float COLLISION_OFFSET = 0.01f; // Margin around objects to avoid running EPA too often.
 
 // SOLVER
-static constexpr size_t VELOCITY_SOLVER_ITERATIONS = 10;
-static constexpr size_t POSITION_SOLVER_ITERATIONS = 10;
+static constexpr size_t VELOCITY_SOLVER_ITERATIONS = 8;
+static constexpr size_t POSITION_SOLVER_ITERATIONS = 2;
 static constexpr float SLOP = 0.01f; // The size of the floaty region around objects that dampen jitter
 
 

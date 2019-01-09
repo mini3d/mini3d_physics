@@ -321,7 +321,7 @@ void doEvents() {
             } else if (event.key.code == sf::Keyboard::Period) {
             } else if (event.key.code == sf::Keyboard::Num0) {
                 Box box(Vec3(0.4f, 0.4f, 0.4f));
-                box.transform.pos = Vec3(0.5f, 0, 5.0f);
+                box.transform.pos = Vec3(0.8f, 0, 5.0f);
                 box.velocity = Vec3(0.0f, 0, 0);
                 physics.add(box);
             } else if (event.key.code == sf::Keyboard::Num9) {

@@ -643,22 +643,6 @@ size_t findFace(const Hull &hull, const Vec3 &normal) {
 
 void doContacts(Manifold &manifold) {
 
-/*
-    if (manifold.contactsCount == 4) {
-        bool allStatic = true;
-
-        for (int i = 0; i < manifold.contactsCount; ++i) {
-            Contact &contact = manifold.contacts[i];
-            if (!contact.isStatic) {
-                allStatic = false;
-            }
-        }
-        
-        if (allStatic) {
-            return;
-        }
-    }
-*/
     Body &a = *manifold.body[FIRST];
     Body &b = *manifold.body[SECOND];
 
@@ -719,8 +703,9 @@ void doContacts(Manifold &manifold) {
         Vec3 posA = it->p - (it->p - a.transform * faceA.pos).Dot(a.transform.rotate(faceA.normal)) * a.transform.rotate(faceA.normal) + Physics::COLLISION_OFFSET * normal;
         Vec3 posB = it->p - (it->p - b.transform * faceB.pos).Dot(b.transform.rotate(faceB.normal)) * b.transform.rotate(faceB.normal) - Physics::COLLISION_OFFSET * normal;
 
-        float distance = -(posB - posA).Dot(normal);
-        if (distance < 0) {
+        float distance = (posB - posA).Dot(normal);
+        
+        if (distance > Physics::SLOP) {
             it = clipPointsA.erase(it);
         } else {
             it++;
@@ -740,7 +725,7 @@ void doContacts(Manifold &manifold) {
 
         float distance = (posB - posA).Dot(normal);
         
-        if (distance > 0) {
+        if (distance > Physics::SLOP) {
             --contactsCount;
             continue;
         }
@@ -784,14 +769,6 @@ void doContacts(Manifold &manifold) {
             contact.impulse[TANGENT] = oldContact.impulse[TANGENT];
             contact.impulse[BINORMAL] = oldContact.impulse[BINORMAL];
             contact.correction = oldContact.correction;
-            
-            if (oldContact.isStatic) {
-                contact.pos[FIRST] = oldContact.pos[FIRST];
-                contact.pos[SECOND] = oldContact.pos[SECOND];
-                contact.pos0[FIRST] = oldContact.pos0[FIRST];
-                contact.pos0[SECOND] = oldContact.pos0[SECOND];
-                contact.isStatic = oldContact.isStatic;
-            }
         } else {
             printf("no match: %p\n", &cp);
         }
@@ -866,7 +843,6 @@ void solveVelocities(Manifold &manifold, size_t iteration, float timeStep) {
         // Tangent and binormal
         // TODO: Apply max friction to resultant vector of normal and bitangent friction (can't apply componentwise like we do now!)
 
-        bool isStatic = true;
         for (int n = TANGENT; n <= BINORMAL; ++n) {
             float maxFriction = contact.friction * contact.impulse[NORMAL];
             float oldImpulse = contact.impulse[n];
@@ -879,27 +855,25 @@ void solveVelocities(Manifold &manifold, size_t iteration, float timeStep) {
             float sum = impulse + contact.impulse[n];
             float clampedImpulse = max(min(sum, maxFriction), -maxFriction);
             
-            if (abs(clampedImpulse) < abs(sum)) {
-                isStatic = false;
-            }
-
             contact.impulse[n] = clampedImpulse * 0.99f;
             float delta = clampedImpulse - oldImpulse;
             applyImpulse(a, b, delta, contact.n[n], contact.inertia[FIRST][n], contact.inertia[SECOND][n]);
         }
         
-        contact.isStatic = isStatic;
-
-        // Normal
-        // TODO: There is something rotten here. Stacking does not work!
         float oldImpulse = contact.impulse[NORMAL];
 
         Vec3 vRel = calculateVelocity(b, contact.pos[SECOND]) - calculateVelocity(a, contact.pos[FIRST]);
         float velocity = vRel.Dot(contact.n[NORMAL]);
-        float targetVelocity = contact.velocityBias;
+
+        // Allow objects to slightly sink into each other in the direciton of gravity for stable stacks
+        float gravityDirection = abs(contact.n[NORMAL].Dot(Vec3(0,0,1)));
+        float targetVelocity = -0.0001f * gravityDirection;
+
         float impulse = (targetVelocity - velocity ) * contact.mass[NORMAL];
         
         float sum = impulse + contact.impulse[NORMAL];
+        
+        // allow objects to grip together a little bit
         float clampedImpulse = max(sum, 0.0f);
         
         contact.impulse[NORMAL] = clampedImpulse;
@@ -930,36 +904,13 @@ void solvePosition(Manifold &manifold) {
     for (int i = 0; i < manifold.contactsCount; ++i) {
         auto &contact = manifold.contacts[i];
 
-        if (contact.isStatic) {
-            for (int n = TANGENT; n <= BINORMAL; ++n) {
-                auto &contact = manifold.contacts[i];
-
-                Vec3 dRel = (manifold.body[SECOND]->transform * contact.pos0[SECOND]) - (manifold.body[FIRST]->transform * contact.pos0[FIRST]);
-                float distance = dRel.Dot(contact.n[n]);
-                const float targetDistance = 0.0f;
-
-                float correction = (targetDistance - distance) * contact.mass[n] * 0.5f;
-                
-                manifold.body[FIRST]->transform.pos -= contact.n[n] * correction * manifold.body[FIRST]->invMass;
-                manifold.body[SECOND]->transform.pos += contact.n[n] * correction * manifold.body[SECOND]->invMass;
-
-                manifold.body[FIRST]->transform.rot = 0.5f * Ternion(-correction * contact.inertia[FIRST][n]) * manifold.body[FIRST]->transform.rot;
-                manifold.body[SECOND]->transform.rot = 0.5f * Ternion(correction * contact.inertia[SECOND][n]) * manifold.body[SECOND]->transform.rot;
-            }
-        }
-
         Vec3 dRel = (manifold.body[SECOND]->transform * contact.pos0[SECOND]) - (manifold.body[FIRST]->transform * contact.pos0[FIRST]);
-        float distance = dRel.Dot(contact.n[n]);
-        float gravityDistance = distance * contact.n[n].Dot(Vec3(0, 0, -1));
-        const float targetDistance = -Physics::SLOP;
 
-        float correction = (targetDistance - distance) * contact.mass[NORMAL] * 0.5f;
-        float clampedCorrection;
-        if (contact.isStatic) {
-            clampedCorrection = correction;
-        } else {
-            clampedCorrection = max(correction, 0.0f);
-        }
+        float distance = dRel.Dot(contact.n[n]);
+        const float targetDistance = 0.0f;
+
+        float correction = (targetDistance - distance) * contact.mass[NORMAL];
+        float clampedCorrection = max(0.5f * correction, 0.0f);
         
         manifold.body[FIRST]->transform.pos -= contact.n[n] * clampedCorrection * manifold.body[FIRST]->invMass;
         manifold.body[SECOND]->transform.pos += contact.n[n] * clampedCorrection * manifold.body[SECOND]->invMass;
