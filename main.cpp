@@ -77,7 +77,7 @@ struct Camera {
     
 };
 
-Camera camera = { Vec3(0, -10.0f, 0), Vec3(0,0,1), 80, 1600, 1200};
+Camera camera = { Vec3(0, -10.0f, 0), Vec3(0,0,1), 80, 1920, 1200};
 
 Body* getBodyUnderMouse(Vec3 &point) {
     const Ray ray = camera.getPickingRayFromScerenCoords(xOld, yOld);

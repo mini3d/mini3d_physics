@@ -35,9 +35,11 @@ static constexpr float COLLISION_OFFSET = 0.01f; // Margin around objects to avo
 
 // SOLVER
 static constexpr size_t VELOCITY_SOLVER_ITERATIONS = 8;
-static constexpr size_t POSITION_SOLVER_ITERATIONS = 2;
+static constexpr size_t POSITION_SOLVER_ITERATIONS = 4;
 static constexpr float SLOP = 0.01f; // The size of the floaty region around objects that dampen jitter
 
+// SLEEPING
+static constexpr float BODY_SLEEP_TIME = 30.0f;
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //

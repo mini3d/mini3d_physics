@@ -116,7 +116,9 @@ void draw(const Body &body) {
     glPushMatrix();
         applyTransform(body.transform);
         for (int i = 0; i < body.hull.faceVertices.size(); ++i) {
-            setColor(body.isAwake ? 0x80A0D0FF : 0xC0C0C0FF);
+            unsigned int color = body.isAwake ? body.sleepTimer < 60.0f ? 0x80A0D0FF : 0x405070FF : 0xC0C0C0FF;
+            
+            setColor(color);
             drawFace(body.hull, i);
         }
     glPopMatrix();
