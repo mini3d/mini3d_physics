@@ -665,10 +665,8 @@ void doContacts(Manifold &manifold) {
         sp = findSeparatingAxis(a.transform, b.transform, a.hull, b.hull, axis);
     }
     
-    if (!paused) {
-        manifold.axis = axis;
-        manifold.simplex = s;
-    }
+    manifold.axis = axis;
+    manifold.simplex = s;
     
     axis.Normalize();
     //axis = Vec3(0,0,1).Dir(b.transform.pos - a.transform.pos);
@@ -832,6 +830,9 @@ void preSolveManifold(Manifold &manifold) {
         applyImpulse(a, b, contact.impulse[TANGENT], contact.n[TANGENT], contact.inertia[FIRST][TANGENT], contact.inertia[SECOND][TANGENT]);
         applyImpulse(a, b, contact.impulse[BINORMAL], contact.n[BINORMAL], contact.inertia[FIRST][BINORMAL], contact.inertia[SECOND][BINORMAL]);
 
+        Vec3 vRel = calculateVelocity(b, contact.pos[SECOND]) - calculateVelocity(a, contact.pos[FIRST]);
+        float velocity = vRel.Dot(contact.n[NORMAL]);
+        contact.velocityBias = velocity < Physics::RESTITUTION_VELOCITY_THRESHOLD && contact.impulse[NORMAL] == 0.0f ? -velocity * contact.restitution : 0.0f;
     }
 }
 
@@ -842,7 +843,7 @@ void solveVelocities(Manifold &manifold, size_t iteration, float timeStep) {
     Body &a = *manifold.body[FIRST];
     Body &b = *manifold.body[SECOND];
 
-    for (int k = 0; k < 2; k++) {
+    for (int k = 0; k < Physics::MANIFOLD_SOLVER_ITERATIONS; k++) {
         for (int i = 0; i < manifold.contactsCount; ++i) {
             auto &contact = manifold.contacts[i];
 
@@ -890,7 +891,7 @@ void solvePosition(Manifold &manifold) {
 
     size_t n = NORMAL;
     
-    for (int k = 0; k < 2; k++) {
+    for (int k = 0; k < Physics::MANIFOLD_SOLVER_ITERATIONS; k++) {
         for (int i = 0; i < manifold.contactsCount; ++i) {
             auto &contact = manifold.contacts[i];
 
@@ -904,7 +905,7 @@ void solvePosition(Manifold &manifold) {
             // Allow objects to slightly sink into each other in the direciton of gravity for stable stacks
             float gravityDireciton = contact.n[NORMAL].Dot(Vec3(0,0,1));
             gravityDireciton *= gravityDireciton;
-            float clampedCorrection = max(0.5f * correction, Physics::SLOP * -0.0001f * gravityDireciton);
+            float clampedCorrection = max(0.5f * correction, Physics::MAX_CONTACT_NEGATIVE_VELOCITY * gravityDireciton);
             
             manifold.body[FIRST]->transform.pos -= contact.n[n] * clampedCorrection * manifold.body[FIRST]->invMass;
             manifold.body[SECOND]->transform.pos += contact.n[n] * clampedCorrection * manifold.body[SECOND]->invMass;
@@ -1079,53 +1080,55 @@ void Physics::drawManifolds() {
 
 void Physics::step(float timeStep, const Physics::CollisionCallbacks &callback) {
 
+    if (paused) {
+        return;
+    }
+
     // Update velocities
     const Vec3 gravity(0.0f, 0.0f, -GRAVITY);
-    if (!paused) {
-        for (int i = 0; i < bodies.size(); ++i) {
-            if (bodies[i].isAwake && !bodies[i].isFixed()) {
-                bodies[i].velocity *= bodies[i].sleepTimer > 1.0f ? 0.5f : 0.995f;
-                bodies[i].angularVelocity *= bodies[i].sleepTimer > 1.0f ? 0.5f : 0.995f;
+    for (int i = 0; i < bodies.size(); ++i) {
+        if (bodies[i].isAwake && !bodies[i].isFixed()) {
+            bodies[i].velocity *= bodies[i].sleepTimer > 1.0f ? 0.5f : 0.995f;
+            bodies[i].angularVelocity *= bodies[i].sleepTimer > 1.0f ? 0.5f : 0.995f;
 
-                bodies[i].velocity += gravity * timeStep;
-            }
+            bodies[i].velocity += gravity * timeStep;
         }
+    }
 
-        doBroadPhase(bodies, bodies.size(), timeStep, [&] (Body &a, Body &b) {
-            if (a.proxmimities.size() < b.proxmimities.size() ? !contains(a.proxmimities, &b) : !contains(b.proxmimities, &a)) {
-                manifolds.push_back( {&a, &b} );
-                a.proxmimities.push_back(&b);
-                b.proxmimities.push_back(&a);
-            }
-        });
-    
-        // Remove manifolds that no longer overlap
-        for (auto it = manifolds.begin(); it != manifolds.end(); ) {
-            Body &a = *it->body[FIRST];
-            Body &b = *it->body[SECOND];
-            
-            if(!(a.isFixed() && b.isFixed()) && !testBroadPhaseProximity(a, b, timeStep)) {
-                swapRemove(a.proxmimities, &b);
-                swapRemove(b.proxmimities, &a);
-                swapRemove(manifolds, it);
-
-                // Call the contact ended callback if needed
-                if (it->contactStartedCalled == true && it->ignoreContacts == false) {
-                    callback.contactEnded(it->body[FIRST], it->body[SECOND]);
-                }
-            } else {
-                ++it;
-            }
+    doBroadPhase(bodies, bodies.size(), timeStep, [&] (Body &a, Body &b) {
+        if (a.proxmimities.size() < b.proxmimities.size() ? !contains(a.proxmimities, &b) : !contains(b.proxmimities, &a)) {
+            manifolds.push_back( {&a, &b} );
+            a.proxmimities.push_back(&b);
+            b.proxmimities.push_back(&a);
         }
+    });
 
-        // Wake up islands
-        if (ENABLE_SLEEPING) {
-            for(auto &body : bodies) body.isPartOfIsland = false;
+    // Remove manifolds that no longer overlap
+    for (auto it = manifolds.begin(); it != manifolds.end(); ) {
+        Body &a = *it->body[FIRST];
+        Body &b = *it->body[SECOND];
+        
+        if(!(a.isFixed() && b.isFixed()) && !testBroadPhaseProximity(a, b, timeStep)) {
+            swapRemove(a.proxmimities, &b);
+            swapRemove(b.proxmimities, &a);
+            swapRemove(manifolds, it);
 
-            for(auto &body : bodies) {
-                if (!body.isPartOfIsland && !body.isFixed() && body.isAwake) {
-                    findIsland(&body, [&](Body* body){ body->isAwake = true; });
-                }
+            // Call the contact ended callback if needed
+            if (it->contactStartedCalled == true && it->ignoreContacts == false) {
+                callback.contactEnded(it->body[FIRST], it->body[SECOND]);
+            }
+        } else {
+            ++it;
+        }
+    }
+
+    // Wake up islands
+    if (ENABLE_SLEEPING) {
+        for(auto &body : bodies) body.isPartOfIsland = false;
+
+        for(auto &body : bodies) {
+            if (!body.isPartOfIsland && !body.isFixed() && body.isAwake) {
+                findIsland(&body, [&](Body* body){ body->isAwake = true; });
             }
         }
     }
@@ -1151,68 +1154,66 @@ void Physics::step(float timeStep, const Physics::CollisionCallbacks &callback) 
         }
     }
 
-    if (!paused) {
 
-        // Velocity Solver
+    // Velocity Solver
+    for (auto &it : manifolds) {
+        if (it.body[FIRST]->isAwake || it.body[SECOND]->isAwake) {
+            preSolveManifold(it);
+        }
+    }
+
+    for (int i = 0; i < joints.size(); ++i) {
+        joints[i].presolve();
+    }
+
+    for (int k = 0; k < VELOCITY_SOLVER_ITERATIONS; k++) {
         for (auto &it : manifolds) {
             if (it.body[FIRST]->isAwake || it.body[SECOND]->isAwake) {
-                preSolveManifold(it);
-            }
-        }
-
-        for (int i = 0; i < joints.size(); ++i) {
-            joints[i].presolve();
-        }
-
-        for (int k = 0; k < VELOCITY_SOLVER_ITERATIONS; k++) {
-            for (auto &it : manifolds) {
-                if (it.body[FIRST]->isAwake || it.body[SECOND]->isAwake) {
-                    solveVelocities(it, k, timeStep);
-                }
-            }
-            
-            for (int i = 0; i < joints.size(); ++i) {
-                joints[i].solveVelocities();
-            }
-        }
-
-        // put islands to sleep
-        if (ENABLE_SLEEPING) {
-            for(auto &body : bodies) {
-                body.isPartOfIsland = false;
-                body.sleepTimer = (body.velocity.Norm() <= 0.0000005f && body.angularVelocity.Norm() < 0.0000005f) ? body.sleepTimer + timeStep : 0;
-            }
-
-            for(auto &body : bodies) {
-                if (!body.isPartOfIsland && !body.isFixed() && body.isAwake) {
-                    float sleepTimer = FLT_MAX;
-                    findIsland(&body, [&](Body* body){ sleepTimer = min(sleepTimer, body->sleepTimer); });
-                    if (sleepTimer > Physics::BODY_SLEEP_TIME) {
-                        clearIsland(&body);
-                        findIsland(&body, [&](Body* body){ body->isAwake = false; });
-                    }
-                }
-            }
-        }
-
-        // Update positions
-        for (int i = 0; i < bodies.size(); ++i) {
-            Body &body = bodies[i];
-            
-            if (!body.isFixed() && body.isAwake && body.sleepTimer < Physics::BODY_SLEEP_TIME) {
-                body.transform.pos += body.velocity * timeStep;
-                body.transform.rot = 0.5f * timeStep * Ternion(body.angularVelocity) * body.transform.rot;
+                solveVelocities(it, k, timeStep);
             }
         }
         
-        // Position Solver
-        bool enablePositionSolver = true;
-        if (enablePositionSolver) {
-            for (int k = 0; k < POSITION_SOLVER_ITERATIONS; k++) {
-                for (auto &it : manifolds) {
-                    if (it.body[FIRST]->isAwake && it.body[SECOND]->isAwake) {
-                        solvePosition(it);
-                    }
+        for (int i = 0; i < joints.size(); ++i) {
+            joints[i].solveVelocities();
+        }
+    }
+
+    // put islands to sleep
+    if (ENABLE_SLEEPING) {
+        for(auto &body : bodies) {
+            body.isPartOfIsland = false;
+            body.sleepTimer = (body.velocity.Norm() <= BODY_SLEEP_LINEAR_VELOCITY_THRESHOLD && body.angularVelocity.Norm() < BODY_SLEEP_ANGULAR_VELOCITY_THRESHOLD) ? body.sleepTimer + timeStep : 0;
+        }
+
+        for(auto &body : bodies) {
+            if (!body.isPartOfIsland && !body.isFixed() && body.isAwake) {
+                float sleepTimer = FLT_MAX;
+                findIsland(&body, [&](Body* body){ sleepTimer = min(sleepTimer, body->sleepTimer); });
+                if (sleepTimer > Physics::BODY_SLEEP_TIME) {
+                    clearIsland(&body);
+                    findIsland(&body, [&](Body* body){ body->isAwake = false; });
+                }
+            }
+        }
+    }
+
+    // Update positions
+    for (int i = 0; i < bodies.size(); ++i) {
+        Body &body = bodies[i];
+        
+        if (!body.isFixed() && body.isAwake && body.sleepTimer < Physics::BODY_SLEEP_TIME) {
+            body.transform.pos += body.velocity * timeStep;
+            body.transform.rot = 0.5f * timeStep * Ternion(body.angularVelocity) * body.transform.rot;
+        }
+    }
+    
+    // Position Solver
+    bool enablePositionSolver = true;
+    if (enablePositionSolver) {
+        for (int k = 0; k < POSITION_SOLVER_ITERATIONS; k++) {
+            for (auto &it : manifolds) {
+                if (it.body[FIRST]->isAwake && it.body[SECOND]->isAwake) {
+                    solvePosition(it);
                 }
             }
         }
