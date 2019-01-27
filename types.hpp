@@ -50,7 +50,11 @@ struct BoxHull : Hull {
     inline Face face(const Vec3 &dir, float offset)                                    { return { dir * offset, dir }; }
 };
 
+struct Manifold;
+
 struct Body {
+    Body* next;
+    Body* prev;
 
     inline bool isFixed() const                                                 { return invInertia.x == 0 && invInertia.y == 0 && invInertia.z == 0 && invMass == 0; }
     inline float getRadius(float timeStep) const                                { return radius + velocity.RectilinearDistance() * timeStep; }
@@ -75,7 +79,8 @@ struct Body {
     Hull hull;
     
     vector<Body*> proxmimities;
-    
+    vector<Manifold*> manifolds;
+
     inline Vec3 getVelocity(const Vec3 &point) { return velocity + angularVelocity.Cross(point); }
 };
 

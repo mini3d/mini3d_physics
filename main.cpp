@@ -97,6 +97,7 @@ struct Callback : Physics::CollisionCallbacks {
 
 Callback callback;
 
+vector<Body*> bodies;
 
 bool my_tool_active = false;
 float my_color[4];
@@ -104,39 +105,51 @@ float my_color[4];
 void loadStackScene() {
     physics.clearAll();
     
+    for (auto* body : bodies) {
+        delete body;
+    }
+    
     int height = 8;
     for (int j = 0; j < height; ++j) {
-        Body box = Box(Vec3(0.5f));
-        box.transform.pos = Vec3(0, 0, 0.25f + j * 0.52f);
+        Body* box = new Box(Vec3(0.5f));
+        box->transform.pos = Vec3(0, 0, 0.25f + j * 0.52f);
         physics.add(box);
+        bodies.push_back(box);
     }
 
-    Body ground = Box(Vec3(10.0f, 10.0f, 0.5f));
-    ground.transform.pos = Vec3( 0, 0, -0.25f);
-    ground.invMass = 0.0f;
-    ground.invInertia = 0;
+    Body* ground = new Box(Vec3(10.0f, 10.0f, 0.5f));
+    ground->transform.pos = Vec3( 0, 0, -0.25f);
+    ground->invMass = 0.0f;
+    ground->invInertia = 0;
     
     physics.add(ground);
+    bodies.push_back(ground);
 }
 
 void loadPyramidScene() {
     physics.clearAll();
 
+    for (auto* body : bodies) {
+        delete body;
+    }
+
     int height = 5;
     for (int j = 0; j < height; ++j) {
         for (int i = 0; i <= j; ++i) {
-            Body box = Box(Vec3(0.5f));
-            box.transform.pos = Vec3(0.52f * (i - 0.5f * j), 0, -0.25f + (height - j) * 0.52f);
+            Body* box = new Box(Vec3(0.5f));
+            box->transform.pos = Vec3(0.52f * (i - 0.5f * j), 0, -0.25f + (height - j) * 0.52f);
             physics.add(box);
+            bodies.push_back(box);
         }
     }
 
-    Body ground = Box(Vec3(10.0f, 10.0f, 0.5f));
-    ground.transform.pos = Vec3( 0, 0, -0.25f);
-    ground.invMass = 0.0f;
-    ground.invInertia = 0;
-
+    Body* ground = new Box(Vec3(10.0f, 10.0f, 0.5f));
+    ground->transform.pos = Vec3( 0, 0, -0.25f);
+    ground->invMass = 0.0f;
+    ground->invInertia = 0;
+    
     physics.add(ground);
+    bodies.push_back(ground);
 }
 
 void loadJengaScene() {
@@ -145,31 +158,37 @@ void loadJengaScene() {
     int height = 8;
 
     for (int j = 0; j < height; j += 2) {
-        Body box = Box(Vec3(0.2f, 1.2f, 0.2f));
-        box.transform.pos = Vec3(-0.5f, 0, 0.11f + 0.22f * j);
+        Body* box = new Box(Vec3(0.2f, 1.2f, 0.2f));
+        box->transform.pos = Vec3(-0.5f, 0, 0.11f + 0.22f * j);
         physics.add(box);
+        bodies.push_back(box);
 
-        Body box2 = Box(Vec3(0.2f, 1.2f, 0.2f));
-        box2.transform.pos = Vec3(0.5f, 0, 0.11f + 0.22f * j);
+        Body* box2 = new Box(Vec3(0.2f, 1.2f, 0.2f));
+        box2->transform.pos = Vec3(0.5f, 0, 0.11f + 0.22f * j);
         physics.add(box2);
+        bodies.push_back(box2);
     }
 
     for (int j = 0; j < height; j += 2) {
-        Body box = Box(Vec3(1.2f, 0.2f, 0.2f));
-        box.transform.pos = Vec3(0.0f, -0.5f, 0.32f + 0.22f * j);
+        Body* box = new Box(Vec3(1.2f, 0.2f, 0.2f));
+        box->transform.pos = Vec3(0.0f, -0.5f, 0.32f + 0.22f * j);
         physics.add(box);
+        bodies.push_back(box);
 
-        Body box2 = Box(Vec3(1.2f, 0.2f, 0.2f));
-        box2.transform.pos = Vec3(0.0f, 0.5f, 0.32f + 0.22f * j);
+        Body* box2 = new Box(Vec3(1.2f, 0.2f, 0.2f));
+        box2->transform.pos = Vec3(0.0f, 0.5f, 0.32f + 0.22f * j);
         physics.add(box2);
+        bodies.push_back(box2);
     }
 
-    Body ground = Box(Vec3(10.0f, 10.0f, 0.5f));
-    ground.transform.pos = Vec3( 0, 0, -0.25f);
-    ground.invMass = 0.0f;
-    ground.invInertia = 0;
+    Body* ground = new Box(Vec3(10.0f, 10.0f, 0.5f));
+    ground->transform.pos = Vec3( 0, 0, -0.25f);
+    ground->invMass = 0.0f;
+    ground->invInertia = 0;
     
     physics.add(ground);
+    bodies.push_back(ground);
+
 }
 
 bool enableSleeping;
@@ -247,8 +266,8 @@ void display() {
 
     physics.step(1.0f, callback);
 
-    for (auto& body : physics.bodies) {
-        draw(body);
+    for (auto* body : physics.bodies) {
+        draw(*body);
     }
 
     //physics.drawManifolds();
@@ -271,29 +290,29 @@ void doEvents() {
             window.close();
         } else if (event.type == sf::Event::KeyPressed) {
             if (event.key.code == sf::Keyboard::W) {
-                physics.bodies[currentBoxIndex].transform.pos += UP * 0.1f;
+                physics.bodies[currentBoxIndex]->transform.pos += UP * 0.1f;
             } else if (event.key.code == sf::Keyboard::X) {
-                physics.bodies[currentBoxIndex].transform.pos += DOWN * 0.1f;
+                physics.bodies[currentBoxIndex]->transform.pos += DOWN * 0.1f;
             } else if (event.key.code == sf::Keyboard::A) {
-                physics.bodies[currentBoxIndex].transform.pos += LEFT * 0.1f;
+                physics.bodies[currentBoxIndex]->transform.pos += LEFT * 0.1f;
             } else if (event.key.code == sf::Keyboard::D) {
-                physics.bodies[currentBoxIndex].transform.pos += RIGHT * 0.1f;
+                physics.bodies[currentBoxIndex]->transform.pos += RIGHT * 0.1f;
             } else if (event.key.code == sf::Keyboard::R) {
-                physics.bodies[currentBoxIndex].transform.pos += FORWARD * 0.1f;
+                physics.bodies[currentBoxIndex]->transform.pos += FORWARD * 0.1f;
             } else if (event.key.code == sf::Keyboard::V) {
-                physics.bodies[currentBoxIndex].transform.pos += BACK * 0.1f;
+                physics.bodies[currentBoxIndex]->transform.pos += BACK * 0.1f;
             } else if (event.key.code == sf::Keyboard::Num1) {
-                physics.bodies[currentBoxIndex].transform.rot *= Ternion(0.1f, 0, 0);
+                physics.bodies[currentBoxIndex]->transform.rot *= Ternion(0.1f, 0, 0);
             } else if (event.key.code == sf::Keyboard::Num3) {
-                physics.bodies[currentBoxIndex].transform.rot *= Ternion(-0.1f, 0, 0);
+                physics.bodies[currentBoxIndex]->transform.rot *= Ternion(-0.1f, 0, 0);
             } else if (event.key.code == sf::Keyboard::Q) {
-                physics.bodies[currentBoxIndex].transform.rot *= Ternion(0, 0.1f, 0);
+                physics.bodies[currentBoxIndex]->transform.rot *= Ternion(0, 0.1f, 0);
             } else if (event.key.code == sf::Keyboard::E) {
-                physics.bodies[currentBoxIndex].transform.rot *= Ternion(0, -0.1f, 0);
+                physics.bodies[currentBoxIndex]->transform.rot *= Ternion(0, -0.1f, 0);
             } else if (event.key.code == sf::Keyboard::Z) {
-                physics.bodies[currentBoxIndex].transform.rot *= Ternion(0, 0, 0.1f);
+                physics.bodies[currentBoxIndex]->transform.rot *= Ternion(0, 0, 0.1f);
             } else if (event.key.code == sf::Keyboard::C) {
-                physics.bodies[currentBoxIndex].transform.rot *= Ternion(0, 0, -0.1f);
+                physics.bodies[currentBoxIndex]->transform.rot *= Ternion(0, 0, -0.1f);
             } else if (event.key.code == sf::Keyboard::B) {
                 currentBoxIndex = !currentBoxIndex;
             } else if (event.key.code == sf::Keyboard::P) {
@@ -320,15 +339,17 @@ void doEvents() {
             } else if (event.key.code == sf::Keyboard::Comma) {
             } else if (event.key.code == sf::Keyboard::Period) {
             } else if (event.key.code == sf::Keyboard::Num0) {
-                Box box(Vec3(0.4f, 0.4f, 0.4f));
-                box.transform.pos = Vec3(0.8f, 0, 5.0f);
-                box.velocity = Vec3(0.0f, 0, 0);
+                Box* box = new Box(Vec3(0.4f, 0.4f, 0.4f));
+                box->transform.pos = Vec3(0.8f, 0, 5.0f);
+                box->velocity = Vec3(0.0f, 0, 0);
                 physics.add(box);
+                bodies.push_back(box);
             } else if (event.key.code == sf::Keyboard::Num9) {
-                Box box(Vec3(0.2f, 2.0f, 0.2f));
-                box.transform.pos = Vec3(0.0f, -3.0, 2.0f);
-                box.velocity = Vec3(0.0f, 0.2f, -0.05f);
+                Box* box = new Box(Vec3(0.2f, 2.0f, 0.2f));
+                box->transform.pos = Vec3(0.0f, -3.0, 2.0f);
+                box->velocity = Vec3(0.0f, 0.2f, -0.05f);
                 physics.add(box);
+                bodies.push_back(box);
             }
 
         } else if (event.type == sf::Event::MouseButtonPressed) {
@@ -387,6 +408,10 @@ int main (int argc, char **argv) {
     };
 
     ImGui::DestroyContext();
+    
+    for (auto* body : bodies) {
+        delete body;
+    }
 
     return 0;
 }

@@ -129,9 +129,10 @@ struct Manifold {
     
     bool ignoreContacts = false;
     bool contactStartedCalled = false;
+    bool isPartOfIsland = false;
 };
 
-vector<Manifold> manifolds;
+vector<Manifold*> manifolds;
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -140,17 +141,17 @@ vector<Manifold> manifolds;
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-bool testBroadPhaseProximity(const Body &a, const Body &b , const float timeStep) {
-    float radius = a.getRadius(timeStep) + b.getRadius(timeStep);
-    return (a.transform.pos.SquareDistance(b.transform.pos) <= radius * radius);
+bool testBroadPhaseProximity(const Body* a, const Body* b , const float timeStep) {
+    float radius = a->getRadius(timeStep) + b->getRadius(timeStep);
+    return (a->transform.pos.SquareDistance(b->transform.pos) <= radius * radius);
 }
 
 
 template <typename T>
-void doBroadPhase(vector<Body> &bodies, size_t hullCount, float timeStep, T proximity) {
+void doBroadPhase(vector<Body*> &bodies, size_t hullCount, float timeStep, T proximity) {
     for (auto itA = bodies.begin(); itA != bodies.end(); ++itA) {
         for (auto itB = itA + 1; itB != bodies.end(); ++itB) {
-            if (!(itA->isFixed() && itB->isFixed()) && (itA->isAwake || itB->isAwake) && testBroadPhaseProximity(*itA, *itB, timeStep)) {
+            if (!((*itA)->isFixed() && (*itB)->isFixed()) && ((*itA)->isAwake || (*itB)->isAwake) && testBroadPhaseProximity(*itA, *itB, timeStep)) {
                 proximity(*itA, *itB);
             }
         }
@@ -543,10 +544,11 @@ void polygonPolygonClipping(vector<ClipPoint> &subject, vector<ClipPoint> &refer
     }
 }
 
-void reduceContacts(const Manifold &manifold, const Vec3 &normal, const Face &faceA, const Face &faceB, vector<ClipPoint> &clipPoints, vector<ClipPoint> &clipPointsA) {
+void reduceContacts(const Manifold* manifold, const Vec3 &normal, const Face &faceA, const Face &faceB, vector<ClipPoint> &clipPoints, vector<ClipPoint> &clipPointsA) {
 
-    Body &a = *manifold.body[FIRST];
-    Body &b = *manifold.body[SECOND];
+    // TODO: Make pointers instead
+    Body &a = *manifold->body[FIRST];
+    Body &b = *manifold->body[SECOND];
 
     // Get depest point
     if (clipPointsA.size() > 0) {
@@ -641,17 +643,18 @@ size_t findFace(const Hull &hull, const Vec3 &normal) {
     return (size_t)(it - faces.begin());
 }
 
-void doContacts(Manifold &manifold) {
+void doContacts(Manifold* manifold) {
 
-    Body &a = *manifold.body[FIRST];
-    Body &b = *manifold.body[SECOND];
+    // TODO: keep a,b as pointers
+    Body &a = *manifold->body[FIRST];
+    Body &b = *manifold->body[SECOND];
 
     size_t contactsCount = 0;
     array<Contact, 8> contacts;
 
-    Vec3 axis = manifold.axis;
+    Vec3 axis = manifold->axis;
     
-    Simplex s = manifold.simplex;
+    Simplex s = manifold->simplex;
     doGJK(a.transform, b.transform, a.hull, b.hull, s, axis);
     SupportPoint sp = s[0];
     
@@ -665,8 +668,8 @@ void doContacts(Manifold &manifold) {
         sp = findSeparatingAxis(a.transform, b.transform, a.hull, b.hull, axis);
     }
     
-    manifold.axis = axis;
-    manifold.simplex = s;
+    manifold->axis = axis;
+    manifold->simplex = s;
     
     axis.Normalize();
     //axis = Vec3(0,0,1).Dir(b.transform.pos - a.transform.pos);
@@ -750,8 +753,8 @@ void doContacts(Manifold &manifold) {
         size_t bestIndex = -1;
         float bestDistance = FLT_MAX;
         
-        for (size_t i = 0; i < manifold.contactsCount; i++) {
-            const Contact &oldContact = manifold.contacts[i];
+        for (size_t i = 0; i < manifold->contactsCount; i++) {
+            const Contact &oldContact = manifold->contacts[i];
             Vec3 oldContactPos = (a.transform * oldContact.pos0[FIRST] + b.transform * oldContact.pos0[SECOND]) * 0.5f;
             Vec3 newContactPos = (a.transform * contact.pos0[FIRST] + b.transform * contact.pos0[SECOND]) * 0.5f;
 
@@ -763,7 +766,7 @@ void doContacts(Manifold &manifold) {
         }
 
         if (bestIndex != -1 && bestDistance < 0.05f) {
-            const Contact &oldContact = manifold.contacts[bestIndex];
+            const Contact &oldContact = manifold->contacts[bestIndex];
             contact.impulse[NORMAL] = oldContact.impulse[NORMAL];
             contact.impulse[TANGENT] = oldContact.impulse[TANGENT];
             contact.impulse[BINORMAL] = oldContact.impulse[BINORMAL];
@@ -778,8 +781,8 @@ void doContacts(Manifold &manifold) {
         //printf("axis: (%f, %f, %f)\n", axis.x, axis.y, axis.z);
     }
 
-    manifold.contacts = contacts;
-    manifold.contactsCount = contactsCount;
+    manifold->contacts = contacts;
+    manifold->contactsCount = contactsCount;
 }
 
 
@@ -936,7 +939,7 @@ void clearIsland(Body* body) {
 
 template <class T> void findIsland(Body* body, T callback) {
 
-    if (body->isPartOfIsland || body->isFixed()) { // TODO: Dont look at sleeping bodies when putting islands to sleep
+    if (body->isPartOfIsland || body->isFixed()) {
         return;
     }
     
@@ -964,18 +967,18 @@ Body* Physics::rayPicking(Vec3 &point, const Ray &ray) {
 
     Body* bestBody = nullptr;
     float bestDistance = FLT_MAX;
-    for (auto &body : bodies) {
+    for (auto* body : bodies) {
         
-        if (body.isFixed()) {
+        if (body->isFixed()) {
             continue;
         }
         
-        const Ray localRay = -body.transform * ray;
+        const Ray localRay = -body->transform * ray;
 
-        if (Geometry::raySphereIntersection(ray, body.transform.pos, body.radius)) {
+        if (Geometry::raySphereIntersection(ray, body->transform.pos, body->radius)) {
 
-            for (size_t i = 0; i < body.hull.faces.size(); ++i) {
-                const Face &face = body.hull.faces[i];
+            for (size_t i = 0; i < body->hull.faces.size(); ++i) {
+                const Face &face = body->hull.faces[i];
                 
                 // If face is pointiging away, skip it!
                 if (face.normal.Dot(localRay.direction) >= 0) {
@@ -989,14 +992,14 @@ Body* Physics::rayPicking(Vec3 &point, const Ray &ray) {
                 }
 
                 Vec3 projection = ray.origin + ray.direction * distance;
-                Vec3 localProjection = -body.transform * projection;
+                Vec3 localProjection = -body->transform * projection;
 
                 // Check if projection inside face region
-                const auto &faceVertices = body.hull.faceVertices[i];
-                const auto &faceEdgeNormals = body.hull.faceEdgeNormals[i];
+                const auto &faceVertices = body->hull.faceVertices[i];
+                const auto &faceEdgeNormals = body->hull.faceEdgeNormals[i];
                 for (size_t j = 0; j < faceVertices.size(); ++j) {
                     Vec3 edgeNormal = faceEdgeNormals[j];
-                    Vec3 edgePoint = body.hull.vertices[faceVertices[j]];
+                    Vec3 edgePoint = body->hull.vertices[faceVertices[j]];
                     
                     if ((localProjection - edgePoint).Dot(edgeNormal) > 0) {
                         goto NEXT_FACE;
@@ -1004,7 +1007,7 @@ Body* Physics::rayPicking(Vec3 &point, const Ray &ray) {
                 }
 
                 bestDistance = distance;
-                bestBody = &body;
+                bestBody = body;
                 point = projection;
                 
                 NEXT_FACE:;
@@ -1021,13 +1024,13 @@ Body* Physics::rayPicking(Vec3 &point, const Ray &ray) {
 
 
 // Must not be called during call to step
-void Physics::add(Body& body) {
+void Physics::add(Body* body) {
     bodies.push_back(body);
 }
 
 // Must not be called during call to step
 void Physics::remove(Body* body) {
-    // TODO: Implement
+    swapRemove(bodies, body);
 }
 
 // Must not be called during call to step
@@ -1063,10 +1066,10 @@ void drawPoint(GLint color, const Vec3& point, GLfloat size) {
 }
 
 void Physics::drawManifolds() {
-    for (auto& manifold : manifolds) {
-        auto a = manifold.body[FIRST];
-        auto b = manifold.body[SECOND];
-        for (Contact& contact : manifold.contacts) {
+    for (auto* manifold : manifolds) {
+        auto a = manifold->body[FIRST];
+        auto b = manifold->body[SECOND];
+        for (Contact& contact : manifold->contacts) {
             int color = ((int)(max(0.0f, contact.impulse[NORMAL]) * 100000.0f)) << 16;
                 color += ((int)(max(0.0f, contact.impulse[TANGENT]) * 5000000.0f)) << 8;
                 color += ((int)(max(0.0f, contact.impulse[BINORMAL]) * 5000000.0f)) << 24;
@@ -1086,136 +1089,172 @@ void Physics::step(float timeStep, const Physics::CollisionCallbacks &callback) 
 
     // Update velocities
     const Vec3 gravity(0.0f, 0.0f, -GRAVITY);
-    for (int i = 0; i < bodies.size(); ++i) {
-        if (bodies[i].isAwake && !bodies[i].isFixed()) {
-            bodies[i].velocity *= bodies[i].sleepTimer > 1.0f ? 0.5f : 0.995f;
-            bodies[i].angularVelocity *= bodies[i].sleepTimer > 1.0f ? 0.5f : 0.995f;
+    for (auto* body : bodies) {
+        if (body->isAwake && !body->isFixed()) {
+            body->velocity *= body->sleepTimer > 1.0f ? 0.5f : 0.995f;
+            body->angularVelocity *= body->sleepTimer > 1.0f ? 0.5f : 0.995f;
 
-            bodies[i].velocity += gravity * timeStep;
+            body->velocity += gravity * timeStep;
         }
     }
 
-    doBroadPhase(bodies, bodies.size(), timeStep, [&] (Body &a, Body &b) {
-        if (a.proxmimities.size() < b.proxmimities.size() ? !contains(a.proxmimities, &b) : !contains(b.proxmimities, &a)) {
-            manifolds.push_back( {&a, &b} );
-            a.proxmimities.push_back(&b);
-            b.proxmimities.push_back(&a);
+    doBroadPhase(bodies, bodies.size(), timeStep, [&] (Body* a, Body* b) {
+        if (a->proxmimities.size() < b->proxmimities.size() ? !contains(a->proxmimities, b) : !contains(b->proxmimities, a)) {
+            // TODO: This doesn't work since we swap the indices around when we remove thing pointers will become invalid
+            Manifold* manifold = new Manifold();
+            manifold->body[0] = a;
+            manifold->body[1] = b;
+            manifolds.push_back(manifold);
+            a->proxmimities.push_back(b);
+            b->proxmimities.push_back(a);
+            a->manifolds.push_back(manifolds.back());
+            b->manifolds.push_back(manifolds.back());
         }
     });
 
     // Remove manifolds that no longer overlap
     for (auto it = manifolds.begin(); it != manifolds.end(); ) {
-        Body &a = *it->body[FIRST];
-        Body &b = *it->body[SECOND];
         
-        if(!(a.isFixed() && b.isFixed()) && !testBroadPhaseProximity(a, b, timeStep)) {
-            swapRemove(a.proxmimities, &b);
-            swapRemove(b.proxmimities, &a);
+        Manifold* manifold = *it;
+        Body* a = manifold->body[FIRST];
+        Body* b = manifold->body[SECOND];
+        
+        if(!(a->isFixed() && b->isFixed()) && !testBroadPhaseProximity(a, b, timeStep)) {
+            swapRemove(a->proxmimities, b);
+            swapRemove(b->proxmimities, a);
+            swapRemove(a->manifolds, *it);
+            swapRemove(b->manifolds, *it);
             swapRemove(manifolds, it);
 
             // Call the contact ended callback if needed
-            if (it->contactStartedCalled == true && it->ignoreContacts == false) {
-                callback.contactEnded(it->body[FIRST], it->body[SECOND]);
+            if (manifold->contactStartedCalled == true && manifold->ignoreContacts == false) {
+                callback.contactEnded(manifold->body[FIRST], manifold->body[SECOND]);
             }
+            
+            delete manifold;
         } else {
             ++it;
         }
     }
 
-    // Wake up islands
-    if (ENABLE_SLEEPING) {
-        for(auto &body : bodies) body.isPartOfIsland = false;
-
-        for(auto &body : bodies) {
-            if (!body.isPartOfIsland && !body.isFixed() && body.isAwake) {
-                findIsland(&body, [&](Body* body){ body->isAwake = true; });
-            }
-        }
-    }
-
     // Narrowphase
-    
-    for (auto &it : manifolds) {
-        if (!it.ignoreContacts) {
-            doContacts(it);
+    for (auto* manifold : manifolds) {
+
+        if (!manifold->ignoreContacts) {
+            doContacts(manifold);
         }
         
         // Call the callbacks
-        if (it.contactsCount > 0 && !it.contactStartedCalled) {
-            it.ignoreContacts = !callback.contactStarted(it.body[FIRST], it.body[SECOND]);
-            if (it.ignoreContacts) {
-                it.contactsCount = 0;
+        if (manifold->contactsCount > 0 && !manifold->contactStartedCalled) {
+            manifold->ignoreContacts = !callback.contactStarted(manifold->body[FIRST], manifold->body[SECOND]);
+            if (manifold->ignoreContacts) {
+                manifold->contactsCount = 0;
             }
-            it.contactStartedCalled = true;
-        } else if (it.contactsCount == 0 && it.contactStartedCalled) {
-            callback.contactEnded(it.body[FIRST], it.body[SECOND]);
-            it.contactStartedCalled = false;
-            it.ignoreContacts = false;
+            manifold->contactStartedCalled = true;
+        } else if (manifold->contactsCount == 0 && manifold->contactStartedCalled) {
+            callback.contactEnded(manifold->body[FIRST], manifold->body[SECOND]);
+            manifold->contactStartedCalled = false;
+            manifold->ignoreContacts = false;
         }
     }
 
-
-    // Velocity Solver
-    for (auto &it : manifolds) {
-        if (it.body[FIRST]->isAwake || it.body[SECOND]->isAwake) {
-            preSolveManifold(it);
-        }
+    // Find and solve islands
+    for(auto* body : bodies) {
+        body->isPartOfIsland = false;
     }
 
-    for (int i = 0; i < joints.size(); ++i) {
-        joints[i].presolve();
+    for(auto* manifold : manifolds) {
+        manifold->isPartOfIsland = false;
     }
 
-    for (int k = 0; k < VELOCITY_SOLVER_ITERATIONS; k++) {
-        for (auto &it : manifolds) {
-            if (it.body[FIRST]->isAwake || it.body[SECOND]->isAwake) {
-                solveVelocities(it, k, timeStep);
+    vector<Body*> islandBodies;
+    vector<Manifold*> islandManifolds;
+
+    for (auto* body : bodies) {
+        if (!body->isPartOfIsland && !body->isFixed() && body->isAwake) {
+            islandBodies.clear();
+            islandManifolds.clear();
+            
+            bool isIslandAwake = false;
+            
+            findIsland(body, [&](Body* body) {
+                islandBodies.push_back(body);
+                isIslandAwake = isIslandAwake || body->isAwake;
+                
+                // TODO: Nicer way to write this?
+                for (auto* manifold : body->manifolds) {
+                    if (!manifold->isPartOfIsland) {
+                        manifold->isPartOfIsland = true;
+                        islandManifolds.push_back(manifold);
+                    }
+                }
+            });
+            
+            if (!isIslandAwake) {
+                continue;
+            } else {
+                for (auto* body : islandBodies) {
+                    body->isAwake = true;
+                }
             }
-        }
-        
-        for (int i = 0; i < joints.size(); ++i) {
-            joints[i].solveVelocities();
-        }
-    }
+            
+            // Solve island
+            for (auto* manifold : islandManifolds) {
+                if (manifold->body[FIRST]->isAwake || manifold->body[SECOND]->isAwake) {
+                    preSolveManifold(*manifold);
+                }
+            }
 
-    // put islands to sleep
-    if (ENABLE_SLEEPING) {
-        for(auto &body : bodies) {
-            body.isPartOfIsland = false;
-            body.sleepTimer = (body.velocity.Norm() <= BODY_SLEEP_LINEAR_VELOCITY_THRESHOLD && body.angularVelocity.Norm() < BODY_SLEEP_ANGULAR_VELOCITY_THRESHOLD) ? body.sleepTimer + timeStep : 0;
-        }
+            /*
+            for (auto &joint : islandJoints) {
+                joints[i].presolve();
+            }
+            */
 
-        for(auto &body : bodies) {
-            if (!body.isPartOfIsland && !body.isFixed() && body.isAwake) {
+            for (int k = 0; k < VELOCITY_SOLVER_ITERATIONS; k++) {
+                for (auto* manifold : islandManifolds) {
+                    solveVelocities(*manifold, k, timeStep);
+                }
+                
+                /*
+                for (auto &joint : islandJoints) {
+                    joints[i].solveVelocities();
+                }
+                */
+            }
+
+            // Position Solver
+            for (int k = 0; k < POSITION_SOLVER_ITERATIONS; k++) {
+                for (auto* manifold : islandManifolds) {
+                    solvePosition(*manifold);
+                }
+            }
+
+            // Put island to sleep
+            if (ENABLE_SLEEPING) {
                 float sleepTimer = FLT_MAX;
-                findIsland(&body, [&](Body* body){ sleepTimer = min(sleepTimer, body->sleepTimer); });
+                for(auto* body : islandBodies) {
+                    bool isNotMoving = body->velocity.Norm() < BODY_SLEEP_LINEAR_VELOCITY_THRESHOLD;
+                    bool isNotRotating = body->angularVelocity.Norm() < BODY_SLEEP_ANGULAR_VELOCITY_THRESHOLD;
+                    
+                    body->sleepTimer = isNotMoving && isNotRotating ? body->sleepTimer + timeStep : 0;
+                    sleepTimer = min(sleepTimer, body->sleepTimer);
+                }
+                
                 if (sleepTimer > Physics::BODY_SLEEP_TIME) {
-                    clearIsland(&body);
-                    findIsland(&body, [&](Body* body){ body->isAwake = false; });
+                    for(auto* body : islandBodies) {
+                        body->isAwake = false;
+                    }
                 }
             }
         }
     }
 
     // Update positions
-    for (int i = 0; i < bodies.size(); ++i) {
-        Body &body = bodies[i];
-        
-        if (!body.isFixed() && body.isAwake && body.sleepTimer < Physics::BODY_SLEEP_TIME) {
-            body.transform.pos += body.velocity * timeStep;
-            body.transform.rot = 0.5f * timeStep * Ternion(body.angularVelocity) * body.transform.rot;
-        }
-    }
-    
-    // Position Solver
-    bool enablePositionSolver = true;
-    if (enablePositionSolver) {
-        for (int k = 0; k < POSITION_SOLVER_ITERATIONS; k++) {
-            for (auto &it : manifolds) {
-                if (it.body[FIRST]->isAwake && it.body[SECOND]->isAwake) {
-                    solvePosition(it);
-                }
-            }
+    for (auto* body : bodies) {
+        if (!body->isFixed() && body->isAwake && body->sleepTimer < Physics::BODY_SLEEP_TIME) {
+            body->transform.pos += body->velocity * timeStep;
+            body->transform.rot = 0.5f * timeStep * Ternion(body->angularVelocity) * body->transform.rot;
         }
     }
 }
