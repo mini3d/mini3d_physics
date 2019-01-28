@@ -5,11 +5,13 @@
 #ifndef MINI3D_PHYSICS_TYPES_H
 #define MINI3D_PHYSICS_TYPES_H
 
-#include <vector>
-#include <unordered_set>
-#include <cfloat>
 #include "transform.hpp"
 #include "geometry.hpp"
+
+#include <vector>
+#include <unordered_set>
+#include <list>
+#include <cfloat>
 
 namespace mini3d {
 namespace physics {
@@ -78,8 +80,8 @@ struct Body {
     
     Hull hull;
     
-    vector<Body*> proxmimities;
-    vector<Manifold*> manifolds;
+    list<Body*> proxmimities;
+    list<Manifold*> manifolds;
 
     inline Vec3 getVelocity(const Vec3 &point) { return velocity + angularVelocity.Cross(point); }
 };

@@ -13,7 +13,6 @@
 #include <array>
 #include <algorithm>
 #include <unordered_set>
-#include <unordered_map>
 
 // TODO: Remove
 #include <GLUT/glut.h>
@@ -130,9 +129,11 @@ struct Manifold {
     bool ignoreContacts = false;
     bool contactStartedCalled = false;
     bool isPartOfIsland = false;
+    
+    bool operator==(const Manifold &other) const { return (body[0] == other.body[0] && body[1] == other.body[1]) || (body[1] == other.body[0] && body[0] == other.body[1]); }
 };
 
-vector<Manifold*> manifolds;
+list<Manifold> manifolds;
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -148,11 +149,15 @@ bool testBroadPhaseProximity(const Body* a, const Body* b , const float timeStep
 
 
 template <typename T>
-void doBroadPhase(vector<Body*> &bodies, size_t hullCount, float timeStep, T proximity) {
+void doBroadPhase(list<Body> &bodies, size_t hullCount, float timeStep, T proximity) {
     for (auto itA = bodies.begin(); itA != bodies.end(); ++itA) {
-        for (auto itB = itA + 1; itB != bodies.end(); ++itB) {
-            if (!((*itA)->isFixed() && (*itB)->isFixed()) && ((*itA)->isAwake || (*itB)->isAwake) && testBroadPhaseProximity(*itA, *itB, timeStep)) {
-                proximity(*itA, *itB);
+        
+        // TODO: Clean up
+        auto itB = itA;
+        itB++;
+        for ( ; itB != bodies.end(); ++itB) {
+            if (!(itA->isFixed() && itB->isFixed()) && (itA->isAwake || itB->isAwake) && testBroadPhaseProximity(&(*itA), &(*itB), timeStep)) {
+                proximity(&(*itA), &(*itB));
             }
         }
     }
@@ -643,18 +648,18 @@ size_t findFace(const Hull &hull, const Vec3 &normal) {
     return (size_t)(it - faces.begin());
 }
 
-void doContacts(Manifold* manifold) {
+void doContacts(Manifold &manifold) {
 
     // TODO: keep a,b as pointers
-    Body &a = *manifold->body[FIRST];
-    Body &b = *manifold->body[SECOND];
+    Body &a = *manifold.body[FIRST];
+    Body &b = *manifold.body[SECOND];
 
     size_t contactsCount = 0;
     array<Contact, 8> contacts;
 
-    Vec3 axis = manifold->axis;
+    Vec3 axis = manifold.axis;
     
-    Simplex s = manifold->simplex;
+    Simplex s = manifold.simplex;
     doGJK(a.transform, b.transform, a.hull, b.hull, s, axis);
     SupportPoint sp = s[0];
     
@@ -668,8 +673,8 @@ void doContacts(Manifold* manifold) {
         sp = findSeparatingAxis(a.transform, b.transform, a.hull, b.hull, axis);
     }
     
-    manifold->axis = axis;
-    manifold->simplex = s;
+    manifold.axis = axis;
+    manifold.simplex = s;
     
     axis.Normalize();
     //axis = Vec3(0,0,1).Dir(b.transform.pos - a.transform.pos);
@@ -716,7 +721,7 @@ void doContacts(Manifold* manifold) {
 
     // Clip point reduction
     vector<ClipPoint> clipPoints;
-    reduceContacts(manifold, normal, faceA, faceB, clipPoints, clipPointsA);
+    reduceContacts(&manifold, normal, faceA, faceB, clipPoints, clipPointsA);
 
     for (auto & cp : clipPoints) {
         Contact &contact = contacts[contactsCount++];
@@ -753,8 +758,8 @@ void doContacts(Manifold* manifold) {
         size_t bestIndex = -1;
         float bestDistance = FLT_MAX;
         
-        for (size_t i = 0; i < manifold->contactsCount; i++) {
-            const Contact &oldContact = manifold->contacts[i];
+        for (size_t i = 0; i < manifold.contactsCount; i++) {
+            const Contact &oldContact = manifold.contacts[i];
             Vec3 oldContactPos = (a.transform * oldContact.pos0[FIRST] + b.transform * oldContact.pos0[SECOND]) * 0.5f;
             Vec3 newContactPos = (a.transform * contact.pos0[FIRST] + b.transform * contact.pos0[SECOND]) * 0.5f;
 
@@ -766,7 +771,7 @@ void doContacts(Manifold* manifold) {
         }
 
         if (bestIndex != -1 && bestDistance < 0.05f) {
-            const Contact &oldContact = manifold->contacts[bestIndex];
+            const Contact &oldContact = manifold.contacts[bestIndex];
             contact.impulse[NORMAL] = oldContact.impulse[NORMAL];
             contact.impulse[TANGENT] = oldContact.impulse[TANGENT];
             contact.impulse[BINORMAL] = oldContact.impulse[BINORMAL];
@@ -781,8 +786,8 @@ void doContacts(Manifold* manifold) {
         //printf("axis: (%f, %f, %f)\n", axis.x, axis.y, axis.z);
     }
 
-    manifold->contacts = contacts;
-    manifold->contactsCount = contactsCount;
+    manifold.contacts = contacts;
+    manifold.contactsCount = contactsCount;
 }
 
 
@@ -926,17 +931,6 @@ void solvePosition(Manifold &manifold) {
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-void clearIsland(Body* body) {
-    if (!body->isPartOfIsland || body->isFixed()) {
-        return;
-    }
-    
-    body->isPartOfIsland = false;
-    
-    for(auto &body : body->proxmimities)
-        clearIsland(body);
-}
-
 template <class T> void findIsland(Body* body, T callback) {
 
     if (body->isPartOfIsland || body->isFixed()) {
@@ -967,18 +961,18 @@ Body* Physics::rayPicking(Vec3 &point, const Ray &ray) {
 
     Body* bestBody = nullptr;
     float bestDistance = FLT_MAX;
-    for (auto* body : bodies) {
+    for (auto &body : bodies) {
         
-        if (body->isFixed()) {
+        if (body.isFixed()) {
             continue;
         }
         
-        const Ray localRay = -body->transform * ray;
+        const Ray localRay = -body.transform * ray;
 
-        if (Geometry::raySphereIntersection(ray, body->transform.pos, body->radius)) {
+        if (Geometry::raySphereIntersection(ray, body.transform.pos, body.radius)) {
 
-            for (size_t i = 0; i < body->hull.faces.size(); ++i) {
-                const Face &face = body->hull.faces[i];
+            for (size_t i = 0; i < body.hull.faces.size(); ++i) {
+                const Face &face = body.hull.faces[i];
                 
                 // If face is pointiging away, skip it!
                 if (face.normal.Dot(localRay.direction) >= 0) {
@@ -992,14 +986,14 @@ Body* Physics::rayPicking(Vec3 &point, const Ray &ray) {
                 }
 
                 Vec3 projection = ray.origin + ray.direction * distance;
-                Vec3 localProjection = -body->transform * projection;
+                Vec3 localProjection = -body.transform * projection;
 
                 // Check if projection inside face region
-                const auto &faceVertices = body->hull.faceVertices[i];
-                const auto &faceEdgeNormals = body->hull.faceEdgeNormals[i];
+                const auto &faceVertices = body.hull.faceVertices[i];
+                const auto &faceEdgeNormals = body.hull.faceEdgeNormals[i];
                 for (size_t j = 0; j < faceVertices.size(); ++j) {
                     Vec3 edgeNormal = faceEdgeNormals[j];
-                    Vec3 edgePoint = body->hull.vertices[faceVertices[j]];
+                    Vec3 edgePoint = body.hull.vertices[faceVertices[j]];
                     
                     if ((localProjection - edgePoint).Dot(edgeNormal) > 0) {
                         goto NEXT_FACE;
@@ -1007,7 +1001,7 @@ Body* Physics::rayPicking(Vec3 &point, const Ray &ray) {
                 }
 
                 bestDistance = distance;
-                bestBody = body;
+                bestBody = &body;
                 point = projection;
                 
                 NEXT_FACE:;
@@ -1024,13 +1018,13 @@ Body* Physics::rayPicking(Vec3 &point, const Ray &ray) {
 
 
 // Must not be called during call to step
-void Physics::add(Body* body) {
+void Physics::add(Body &body) {
     bodies.push_back(body);
 }
 
 // Must not be called during call to step
-void Physics::remove(Body* body) {
-    swapRemove(bodies, body);
+void Physics::remove(Body &body) {
+    // TODO: Implement reference scheme for bodies
 }
 
 // Must not be called during call to step
@@ -1066,10 +1060,10 @@ void drawPoint(GLint color, const Vec3& point, GLfloat size) {
 }
 
 void Physics::drawManifolds() {
-    for (auto* manifold : manifolds) {
-        auto a = manifold->body[FIRST];
-        auto b = manifold->body[SECOND];
-        for (Contact& contact : manifold->contacts) {
+    for (auto &manifold : manifolds) {
+        auto a = manifold.body[FIRST];
+        auto b = manifold.body[SECOND];
+        for (const Contact& contact : manifold.contacts) {
             int color = ((int)(max(0.0f, contact.impulse[NORMAL]) * 100000.0f)) << 16;
                 color += ((int)(max(0.0f, contact.impulse[TANGENT]) * 5000000.0f)) << 8;
                 color += ((int)(max(0.0f, contact.impulse[BINORMAL]) * 5000000.0f)) << 24;
@@ -1089,95 +1083,88 @@ void Physics::step(float timeStep, const Physics::CollisionCallbacks &callback) 
 
     // Update velocities
     const Vec3 gravity(0.0f, 0.0f, -GRAVITY);
-    for (auto* body : bodies) {
-        if (body->isAwake && !body->isFixed()) {
-            body->velocity *= body->sleepTimer > 1.0f ? 0.5f : 0.995f;
-            body->angularVelocity *= body->sleepTimer > 1.0f ? 0.5f : 0.995f;
+    for (auto &body : bodies) {
+        if (body.isAwake && !body.isFixed()) {
+            body.velocity *= body.sleepTimer > 1.0f ? 0.5f : 0.995f;
+            body.angularVelocity *= body.sleepTimer > 1.0f ? 0.5f : 0.995f;
 
-            body->velocity += gravity * timeStep;
+            body.velocity += gravity * timeStep;
         }
     }
 
     doBroadPhase(bodies, bodies.size(), timeStep, [&] (Body* a, Body* b) {
-        if (a->proxmimities.size() < b->proxmimities.size() ? !contains(a->proxmimities, b) : !contains(b->proxmimities, a)) {
-            // TODO: This doesn't work since we swap the indices around when we remove thing pointers will become invalid
-            Manifold* manifold = new Manifold();
-            manifold->body[0] = a;
-            manifold->body[1] = b;
-            manifolds.push_back(manifold);
+        if (std::find(a->proxmimities.begin(), a->proxmimities.end(), b) == a->proxmimities.end()) {
+            manifolds.push_back({ a, b });
             a->proxmimities.push_back(b);
             b->proxmimities.push_back(a);
-            a->manifolds.push_back(manifolds.back());
-            b->manifolds.push_back(manifolds.back());
+            a->manifolds.push_back(&manifolds.back());
+            b->manifolds.push_back(&manifolds.back());
         }
     });
 
     // Remove manifolds that no longer overlap
     for (auto it = manifolds.begin(); it != manifolds.end(); ) {
         
-        Manifold* manifold = *it;
-        Body* a = manifold->body[FIRST];
-        Body* b = manifold->body[SECOND];
+        Body* a = it->body[FIRST];
+        Body* b = it->body[SECOND];
         
         if(!(a->isFixed() && b->isFixed()) && !testBroadPhaseProximity(a, b, timeStep)) {
-            swapRemove(a->proxmimities, b);
-            swapRemove(b->proxmimities, a);
-            swapRemove(a->manifolds, *it);
-            swapRemove(b->manifolds, *it);
-            swapRemove(manifolds, it);
+            a->proxmimities.remove(b);
+            b->proxmimities.remove(a);
+            a->manifolds.remove(&(*it));
+            b->manifolds.remove(&(*it));
+            it = manifolds.erase(it);
 
             // Call the contact ended callback if needed
-            if (manifold->contactStartedCalled == true && manifold->ignoreContacts == false) {
-                callback.contactEnded(manifold->body[FIRST], manifold->body[SECOND]);
+            if (it->contactStartedCalled == true && it->ignoreContacts == false) {
+                callback.contactEnded(a, b);
             }
-            
-            delete manifold;
         } else {
             ++it;
         }
     }
 
     // Narrowphase
-    for (auto* manifold : manifolds) {
+    for (auto &manifold : manifolds) {
 
-        if (!manifold->ignoreContacts) {
+        if (!manifold.ignoreContacts) {
             doContacts(manifold);
         }
         
         // Call the callbacks
-        if (manifold->contactsCount > 0 && !manifold->contactStartedCalled) {
-            manifold->ignoreContacts = !callback.contactStarted(manifold->body[FIRST], manifold->body[SECOND]);
-            if (manifold->ignoreContacts) {
-                manifold->contactsCount = 0;
+        if (manifold.contactsCount > 0 && !manifold.contactStartedCalled) {
+            manifold.ignoreContacts = !callback.contactStarted(manifold.body[FIRST], manifold.body[SECOND]);
+            if (manifold.ignoreContacts) {
+                manifold.contactsCount = 0;
             }
-            manifold->contactStartedCalled = true;
-        } else if (manifold->contactsCount == 0 && manifold->contactStartedCalled) {
-            callback.contactEnded(manifold->body[FIRST], manifold->body[SECOND]);
-            manifold->contactStartedCalled = false;
-            manifold->ignoreContacts = false;
+            manifold.contactStartedCalled = true;
+        } else if (manifold.contactsCount == 0 && manifold.contactStartedCalled) {
+            callback.contactEnded(manifold.body[FIRST], manifold.body[SECOND]);
+            manifold.contactStartedCalled = false;
+            manifold.ignoreContacts = false;
         }
     }
 
     // Find and solve islands
-    for(auto* body : bodies) {
-        body->isPartOfIsland = false;
+    for(auto &body : bodies) {
+        body.isPartOfIsland = false;
     }
 
-    for(auto* manifold : manifolds) {
-        manifold->isPartOfIsland = false;
+    for(auto &manifold : manifolds) {
+        manifold.isPartOfIsland = false;
     }
 
     vector<Body*> islandBodies;
     vector<Manifold*> islandManifolds;
 
-    for (auto* body : bodies) {
-        if (!body->isPartOfIsland && !body->isFixed() && body->isAwake) {
+    for (auto &body : bodies) {
+        if (!body.isPartOfIsland && !body.isFixed() && body.isAwake) {
             islandBodies.clear();
             islandManifolds.clear();
             
             bool isIslandAwake = false;
             
-            findIsland(body, [&](Body* body) {
+            findIsland(&body, [&](Body* body) {
                 islandBodies.push_back(body);
                 isIslandAwake = isIslandAwake || body->isAwake;
                 
@@ -1251,10 +1238,10 @@ void Physics::step(float timeStep, const Physics::CollisionCallbacks &callback) 
     }
 
     // Update positions
-    for (auto* body : bodies) {
-        if (!body->isFixed() && body->isAwake && body->sleepTimer < Physics::BODY_SLEEP_TIME) {
-            body->transform.pos += body->velocity * timeStep;
-            body->transform.rot = 0.5f * timeStep * Ternion(body->angularVelocity) * body->transform.rot;
+    for (auto &body : bodies) {
+        if (!body.isFixed() && body.isAwake) {
+            body.transform.pos += body.velocity * timeStep;
+            body.transform.rot = 0.5f * timeStep * Ternion(body.angularVelocity) * body.transform.rot;
         }
     }
 }

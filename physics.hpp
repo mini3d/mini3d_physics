@@ -9,6 +9,8 @@
 #include "geometry.hpp"
 #include "constraints.hpp"
 
+#include <list>
+
 namespace mini3d {
 namespace physics {
 
@@ -52,8 +54,8 @@ static constexpr float BODY_SLEEP_ANGULAR_VELOCITY_THRESHOLD = 0.0000005f;
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-// TODO: Hide!
-vector<Body*> bodies;
+// TODO: Hide all of this!
+list<Body> bodies;
 vector<MouseConstraint> joints;
 
 
@@ -80,10 +82,10 @@ struct CollisionCallbacks {
 Body* rayPicking(Vec3 &point, const Ray &ray);
 
 // Must not be called during call to step
-void add(Body* body);
+void add(Body &body);
 
 // Must not be called during call to step
-void remove(Body* body);
+void remove(Body &body);
 
 // Must not be called during call to step
 void clearAll();
