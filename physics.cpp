@@ -235,11 +235,7 @@ void doEPA(const Transform &tfa, const Transform &tfb, const Hull &hull, const H
 
         const SupportPoint sp = getSupport(tfa, tfb, hull, hull2, triangle->n);
 
-        // TODO: This sometimes fails
-        if (iterations++ > 30) {
-            assert(false);
-        }
-
+        // Distance to closest
         if(((triangle->n.Dot(sp.p)) - triangle->u.distance <= triangle->u.norm * Physics::COLLISION_EPSILON)) {
             Vec3 p0 = points[triangle->i[0]].p;
             Vec3 p1 = points[triangle->i[1]].p;
@@ -247,6 +243,30 @@ void doEPA(const Transform &tfa, const Transform &tfb, const Hull &hull, const H
 
             s =  { 3, points[triangle->i[0]], points[triangle->i[1]], points[triangle->i[2]] };
             return;
+        }
+
+        // Check that the new axis defines a plane that separates the new support point from the old ones by some margin
+        // Makes sure that:
+        // 1. The new support point is better than all of the old ones
+        // 2. The new search axis is straigt
+        // 3. The new simplex is large enough and affinely independent (not malformed)
+        for (int j = 0; j < s.count; ++j) {
+            float d = (sp.p - s[j].p).Dot(triangle->n);
+            if (d * d < Physics::COLLISION_EPSILON_SQUARED * triangle->n.Norm()) {
+
+                Vec3 p0 = points[triangle->i[0]].p;
+                Vec3 p1 = points[triangle->i[1]].p;
+                Vec3 p2 = points[triangle->i[2]].p;
+
+                s =  { 3, points[triangle->i[0]], points[triangle->i[1]], points[triangle->i[2]] };
+
+                return;
+            }
+        }
+
+        // TODO: This sometimes fails
+        if (iterations++ > 30) {
+            assert(false);
         }
 
         for(auto it = triangles.begin(); it != triangles.end();) {
@@ -289,18 +309,22 @@ int32_t xorshift32() {
 
 // This is a last resort when EPA fails
 SupportPoint findSeparatingAxis(const Transform &tfa, const Transform &tfb, const Hull &hull, const Hull &hull2, Vec3 &bestAxis) {
-    assert(false); // TODO: We dont want to end up here
+    // assert(false); // TODO: We dont want to end up here
     
     //TODO: Change this to just sample a fixed uniform set of direcitons instead!
-    Fraction bestDistance;
-    SupportPoint bestSupportPoint;
+    
+    SupportPoint bestSupportPoint = getSupport(tfa, tfb, hull, hull2, bestAxis);
+    Fraction bestDistance = { -bestSupportPoint.p.Dot(bestAxis), bestAxis.Norm() };
 
-    size_t iterations = 100;
-    bestAxis = (tfb.pos - tfa.pos).Norm() < Physics::COLLISION_EPSILON_SQUARED ? tfb.pos - tfa.pos : Vec3(0,1,0);
+    Vec3 defaultAxis = (tfb.pos - tfa.pos).Norm() < Physics::COLLISION_EPSILON_SQUARED ? tfb.pos - tfa.pos : Vec3(0,1,0);
+    SupportPoint defaultSupportPoint = getSupport(tfa, tfb, hull, hull2, defaultAxis);
+    Fraction defaultDistance = { -defaultSupportPoint.p.Dot(defaultAxis), defaultAxis.Norm() };
 
-    bestSupportPoint = getSupport(tfa, tfb, hull, hull2, bestAxis);
-    bestDistance = { -bestSupportPoint.p.Dot(bestAxis), bestAxis.Norm() };
+    bestAxis = defaultDistance < bestDistance ? bestAxis : defaultAxis;
+    bestSupportPoint = defaultDistance < bestDistance ? bestSupportPoint : defaultSupportPoint;
+    bestDistance = defaultDistance < bestDistance ? bestDistance : defaultDistance;
 
+    size_t iterations = 20;
     // Search random directions.
     for (int i = 0; i < iterations; ++i) {
         // Randomly try a different direction in the vicinity of bestDir
@@ -403,7 +427,7 @@ void doGJK(const Transform &tfa, const Transform &tfb, const Hull &hull, const H
     size_t i = 0;
     for ( ;; ) {
 
-        // For each simplex level, keep the simplex if origo is inside, otherwise keep most separating subsimplex.
+        // For each simplex level, keep the simplex if origo is inside, otherwise keep the subsimplex containing the closest point.
         switch (s.count) {
             case 4: {
                 if (testVertexTetrahedron(s[0].p, s[1].p, s[2].p, s[3].p)) { s = {1, { s[0] }}; break; }
@@ -459,7 +483,7 @@ void doGJK(const Transform &tfa, const Transform &tfb, const Hull &hull, const H
         
         // Distance to closest point on simplex must be strictly decreasing unless we have found the best simplex
         // Make sure we make decent progress each step. Otherwise we are probably stuck in a loop.
-        if (minDistance * 0.95f < distanceToSimplex) {
+        if (minDistance * 0.95f <= distanceToSimplex) {
             return;
         } else {
             minDistance = distanceToSimplex;
@@ -670,6 +694,7 @@ void doContacts(Manifold &manifold) {
     }
 
     if (s.count == 4) {
+        axis = manifold.axis;
         sp = findSeparatingAxis(a.transform, b.transform, a.hull, b.hull, axis);
     }
     
