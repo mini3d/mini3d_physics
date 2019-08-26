@@ -16,6 +16,7 @@
 #include <chrono>
 #include <thread>
 #include <functional>
+#include <random>
 
 using namespace std;
 using namespace mini3d::math;
@@ -86,12 +87,12 @@ Body* getBodyUnderMouse(Vec3 &point) {
 
 struct Callback : Physics::CollisionCallbacks {
     bool contactStarted(const Body* a, const Body* b) const {
-        printf("Collision started: %p, %p\n", a, b);
+//        printf("Collision started: %p, %p\n", a, b);
         return true;
     }
     
     void contactEnded(const Body* a, const Body* b) const {
-        printf("Collision ended: %p, %p\n", a, b);
+//        printf("Collision ended: %p, %p\n", a, b);
     }
 };
 
@@ -101,15 +102,8 @@ Callback callback;
 bool my_tool_active = false;
 float my_color[4];
 
-void loadStackScene() {
+void loadEmptyScene() {
     physics.clearAll();
-    
-    int height = 8;
-    for (int j = 0; j < height; ++j) {
-        Body box = Box(Vec3(0.5f));
-        box.transform.pos = Vec3(0, 0, 0.25f + j * 0.52f);
-        physics.add(box);
-    }
 
     Body ground = Box(Vec3(10.0f, 10.0f, 0.5f));
     ground.transform.pos = Vec3( 0, 0, -0.25f);
@@ -119,8 +113,19 @@ void loadStackScene() {
     physics.add(ground);
 }
 
+void loadStackScene() {
+    loadEmptyScene();
+
+    int height = 8;
+    for (int j = 0; j < height; ++j) {
+        Body box = Box(Vec3(0.5f));
+        box.transform.pos = Vec3(0, 0, 0.25f + j * 0.52f);
+        physics.add(box);
+    }
+}
+
 void loadPyramidScene() {
-    physics.clearAll();
+    loadEmptyScene();
 
     int height = 5;
     for (int j = 0; j < height; ++j) {
@@ -130,18 +135,11 @@ void loadPyramidScene() {
             physics.add(box);
         }
     }
-
-    Body ground = Box(Vec3(10.0f, 10.0f, 0.5f));
-    ground.transform.pos = Vec3( 0, 0, -0.25f);
-    ground.invMass = 0.0f;
-    ground.invInertia = 0;
-
-    physics.add(ground);
 }
 
 void loadJengaScene() {
-    physics.clearAll();
-    
+    loadEmptyScene();
+
     int height = 8;
 
     for (int j = 0; j < height; j += 2) {
@@ -163,19 +161,12 @@ void loadJengaScene() {
         box2.transform.pos = Vec3(0.0f, 0.5f, 0.32f + 0.22f * j);
         physics.add(box2);
     }
-
-    Body ground = Box(Vec3(10.0f, 10.0f, 0.5f));
-    ground.transform.pos = Vec3( 0, 0, -0.25f);
-    ground.invMass = 0.0f;
-    ground.invInertia = 0;
-    
-    physics.add(ground);
 }
 
 bool enableSleeping;
 
-std::vector<std::string> items = { "stack", "pyramid", "jenga" };
-std::vector<std::function<void()>> functions = { loadStackScene, loadPyramidScene, loadJengaScene };
+std::vector<std::string> items = { "empty", "stack", "pyramid", "jenga" };
+std::vector<std::function<void()>> functions = { loadEmptyScene, loadStackScene, loadPyramidScene, loadJengaScene };
 std::string current_item = items[0];
 
 void displayImgui() {
@@ -244,7 +235,7 @@ void display() {
     glLighti(GL_LIGHT0, GL_DIFFUSE, 0xFFFFFFFF);
     glLighti(GL_LIGHT0, GL_SPECULAR, 0xFFFFFFFF);
     glLightfv(GL_LIGHT0, GL_POSITION, position);
-
+    
     physics.step(1.0f, callback);
 
     for (auto& body : physics.bodies) {
@@ -299,6 +290,12 @@ void doEvents() {
                 currentBoxIndex = !currentBoxIndex;
             } else if (event.key.code == sf::Keyboard::P) {
                 physics.setPaused(paused = !paused);
+            } else if (event.key.code == sf::Keyboard::S) {
+                if (paused) {
+                    physics.setPaused(false);
+                    physics.step(1.0f, callback);
+                    physics.setPaused(true);
+                }
             } else if (event.key.code == sf::Keyboard::Y) {
                 if (physics.joints.size() > 0) {
                     physics.joints.clear();
@@ -321,7 +318,11 @@ void doEvents() {
             } else if (event.key.code == sf::Keyboard::Comma) {
             } else if (event.key.code == sf::Keyboard::Period) {
             } else if (event.key.code == sf::Keyboard::Num0) {
+                std::random_device rng;
+                std::mt19937 urng(rng());
+                std::uniform_real_distribution<> dist(-0.05f,0.05f);
                 Box box(Vec3(0.4f, 0.4f, 0.4f));
+                //box.transform.pos = Vec3(0.8f + dist(rng), 0 + dist(rng), 5.0f);
                 box.transform.pos = Vec3(0.8f, 0, 5.0f);
                 box.velocity = Vec3(0.0f, 0, 0);
                 physics.add(box);
@@ -359,7 +360,7 @@ void doEvents() {
 }
 
 int main (int argc, char **argv) {
-    loadStackScene();
+    loadEmptyScene();
 
     window.create(sf::VideoMode(camera.windowX, camera.windowY), "Mini3d Physics", sf::Style::Default, sf::ContextSettings(32));
     window.setFramerateLimit(60);

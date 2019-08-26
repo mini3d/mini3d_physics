@@ -68,8 +68,8 @@ struct Body {
     Vec3 invInertia = 0.0f;
     float invMass = 0.0f;
     
-    float friction = 0.4f;
-    float restitution = 0.5f;
+    float friction = 0.3f;
+    float restitution = 0.0f;
 
     float radius = 0.0f;
     float sleepTimer = 0.0f;
