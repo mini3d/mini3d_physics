@@ -17,6 +17,7 @@
 #include <thread>
 #include <functional>
 #include <random>
+#include <iostream>
 
 using namespace std;
 using namespace mini3d::math;
@@ -235,9 +236,13 @@ void display() {
     glLighti(GL_LIGHT0, GL_DIFFUSE, 0xFFFFFFFF);
     glLighti(GL_LIGHT0, GL_SPECULAR, 0xFFFFFFFF);
     glLightfv(GL_LIGHT0, GL_POSITION, position);
-    
-    physics.step(1.0f, callback);
 
+    auto start = std::chrono::high_resolution_clock::now();
+    physics.step(1.0f, callback);
+    auto end = std::chrono::high_resolution_clock::now();
+    auto microseconds = std::chrono::duration_cast<std::chrono::microseconds>(end-start).count();
+    
+    cout << "Frame time: " << microseconds << endl;
     for (auto& body : physics.bodies) {
         draw(body);
     }
