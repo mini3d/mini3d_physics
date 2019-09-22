@@ -867,11 +867,6 @@ void preSolveManifold(Manifold &manifold) {
     for (int i = 0; i < manifold.contactsCount; ++i) {
         auto &contact = manifold.contacts[i];
     
-        // TODO: Put everything in the contacts so we don't need the manifold here!
-        float frictionIncrease = 1.0f + 0.2f * (a.sleepTimer > 0.0f && b.sleepTimer > 0.0f);
-        
-        contact.friction = sqrtf(a.friction * b.friction * frictionIncrease);
-
         for (int n = NORMAL; n < NORMALS_COUNT; ++n) {
             
             Vec3 localNormalA = a.transform.rotateInv(contact.n[n]);
@@ -887,6 +882,9 @@ void preSolveManifold(Manifold &manifold) {
 
         Vec3 vRel = calculateVelocity(b, contact.pos[SECOND]) - calculateVelocity(a, contact.pos[FIRST]);
         float velocity = vRel.Dot(contact.n[NORMAL]);
+
+        float frictionIncrease = 1.0f + 0.5f * ((a.sleepTimer > 0.0f || a.isFixed()) && (b.sleepTimer > 0.0f || b.isFixed()));
+        contact.friction = sqrtf(a.friction * b.friction * frictionIncrease);
 
         float restitution = max(a.restitution, b.restitution);
 
@@ -985,13 +983,13 @@ void solvePosition(Manifold &manifold) {
             float distance = dRel.Dot(contact.n[NORMAL]);
             const float targetDistance = 0.0f;
 
-            float correction = 0.5f * (targetDistance - distance) * contact.mass[NORMAL];
-
+            float correction = (targetDistance - distance) * contact.mass[NORMAL];
             float sum = correction + contact.correction;
             
-            // Allow objects to slightly sink into each other in the direciton of gravity for stable stacks
-            float gravityDireciton = contact.n[NORMAL].Dot(Vec3(0,0,1));
-            float clampedCorrection = max(sum, -contact.impulse[NORMAL]);
+            // Pull objects apart if there is penetration and pull objects toghether
+            // to make surfaces alignt. Never pull the surfaces toghether unless there is
+            // an impulse in the normal direction to avoid objects sticking together like glue.
+            float clampedCorrection = max(sum, min(0.0f, -contact.impulse[NORMAL] * contact.mass[NORMAL]));
             
             contact.correction = clampedCorrection;
             float delta = clampedCorrection - oldCorrection;
@@ -1225,14 +1223,10 @@ void Physics::step(float timeStep, const Physics::CollisionCallbacks &callback) 
     // Update velocities
     const Vec3 gravity(0.0f, 0.0f, -GRAVITY);
     for (auto &body : bodies) {
+        body.totalVelocity = FLT_MIN;
+        body.totalAngularVelocity = FLT_MIN;
+
         if (body.isAwake && !body.isFixed()) {
-        
-            bool isNotMoving = body.velocity.Norm() < BODY_SLEEP_LINEAR_VELOCITY_THRESHOLD;
-            bool isNotRotating = body.angularVelocity.Norm() < BODY_SLEEP_ANGULAR_VELOCITY_THRESHOLD;
-
-            body.velocity *= isNotMoving ? 0.5f : 0.995f;
-            body.angularVelocity *= isNotRotating ? 0.8f : 0.995f;
-
             body.velocity += gravity * timeStep;
         }
     }
@@ -1361,6 +1355,32 @@ void Physics::step(float timeStep, const Physics::CollisionCallbacks &callback) 
                 */
             }
 
+            for (auto* manifold : islandManifolds) {
+                auto a = manifold->body[FIRST];
+                auto b = manifold->body[SECOND];
+                for (int i = 0; i < manifold->contactsCount; i++) {
+                    auto &contact = manifold->contacts[i];
+                    for (int n = NORMAL; n <= BINORMAL; n++) {
+
+                        if (!a->isFixed()) {
+                            float velocityA = contact.impulse[n] * a->invMass;
+                            Vec3 angularVelocityA = contact.impulse[n] * contact.inertia[FIRST][n];
+
+                            a->totalVelocity += velocityA * velocityA;
+                            a->totalAngularVelocity += angularVelocityA.Norm();
+                        }
+
+                        if (!b->isFixed()) {
+                            float velocityB = contact.impulse[n] * b->invMass;
+                            Vec3 angularVelocityB = contact.impulse[n] * contact.inertia[SECOND][n];
+
+                            b->totalVelocity += velocityB * velocityB;
+                            b->totalAngularVelocity += angularVelocityB.Norm();
+                        }
+                    }
+                }
+            }
+
             // Put island to sleep
             if (ENABLE_SLEEPING) {
                 float sleepTimer = FLT_MAX;
@@ -1371,21 +1391,24 @@ void Physics::step(float timeStep, const Physics::CollisionCallbacks &callback) 
                     body->sleepTimer = isNotMoving && isNotRotating ? body->sleepTimer + timeStep : 0;
                     sleepTimer = min(sleepTimer, body->sleepTimer);
                 }
-/*
+
                 if (sleepTimer > 60.0f) {
                     for(auto* body : islandBodies) {
                         body->isAwake = false;
                     }
                 }
-*/
+
             }
         }
     }
 
     // Update positions
     for (auto &body : bodies) {
-        if (!body.isFixed() && body.isAwake && body.sleepTimer == 0) {
+        if (!body.isFixed()) {
+            body.velocity *= max(0.7f, min(1.0f, 10.0f * sqrt(body.velocity.Norm() / body.totalVelocity)));
             body.transform.pos += body.velocity * timeStep;
+            
+            body.angularVelocity *= max(0.7f, min(1.0f, 10.0f * sqrt(body.angularVelocity.Norm() / body.totalAngularVelocity)));
             body.transform.rot = 0.5f * timeStep * Ternion(body.angularVelocity) * body.transform.rot;
         }
     }

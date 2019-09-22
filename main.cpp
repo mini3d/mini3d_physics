@@ -250,9 +250,9 @@ void display() {
         draw(body);
     }
 
-    physics.drawManifolds();
+//    physics.drawManifolds();
 
-    physics.drawDebug();
+//    physics.drawDebug();
 
     glFlush();
 }

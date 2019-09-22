@@ -40,12 +40,12 @@ static constexpr size_t VELOCITY_SOLVER_ITERATIONS = 10;
 static constexpr size_t POSITION_SOLVER_ITERATIONS = 10;
 static constexpr size_t MANIFOLD_SOLVER_ITERATIONS = 3;
 static constexpr float SLOP = 0.01f; // The size of the floaty region around objects that dampen jitter
-static constexpr float RESTITUTION_VELOCITY_THRESHOLD = 2.0f * -Physics::GRAVITY; // Below this collision velocity collisions will be fully elastic (no restitution)
+static constexpr float RESTITUTION_VELOCITY_THRESHOLD = 5.0f * -Physics::GRAVITY; // Below this collision velocity collisions will be fully elastic (no restitution)
  
 // SLEEPING
 static constexpr float BODY_SLEEP_TIME = 10.0f;
-static constexpr float BODY_SLEEP_LINEAR_VELOCITY_THRESHOLD =  0.00000005f;
-static constexpr float BODY_SLEEP_ANGULAR_VELOCITY_THRESHOLD = 0.00000005f;
+static constexpr float BODY_SLEEP_LINEAR_VELOCITY_THRESHOLD =  0.0000001f;
+static constexpr float BODY_SLEEP_ANGULAR_VELOCITY_THRESHOLD = 0.0000001f;
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //
