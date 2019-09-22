@@ -4,8 +4,8 @@
 // It is distributed under the MIT Software License <www.mini3d.org/license.php>
 
 
-#ifndef MINI3D_MATH_QUAT_H
-#define MINI3D_MATH_QUAT_H
+#ifndef MINI3D_MATH_TERNION_H
+#define MINI3D_MATH_TERNION_H
 
 #include "vec3.hpp"
 #include <cfloat>
@@ -39,6 +39,8 @@ public:
     inline const Ternion& operator = (const Vec3 &v)                            { x = v.x; y = v.y; z = v.z; return *this; }
 
     inline const Ternion operator -() const                                     { return Ternion(-x, -y, -z); }
+
+    inline float operator [](int index) const                                   { return xyz[index]; }
 
     inline const Ternion operator +(const Ternion &q) const                     { return Ternion(x + q.x, y + q.y, z + q.z); }
     inline const Ternion operator *(float s) const                              { return Ternion(x * s, y * s, z * s); }

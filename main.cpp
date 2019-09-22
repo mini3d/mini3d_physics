@@ -19,6 +19,9 @@
 #include <random>
 #include <iostream>
 
+#include "tensor.hpp"
+#include "quat.hpp"
+
 using namespace std;
 using namespace mini3d::math;
 using namespace mini3d::physics;
@@ -247,7 +250,9 @@ void display() {
         draw(body);
     }
 
-    //physics.drawManifolds();
+    physics.drawManifolds();
+
+    physics.drawDebug();
 
     glFlush();
 }
@@ -328,7 +333,7 @@ void doEvents() {
                 std::uniform_real_distribution<> dist(-0.05f,0.05f);
                 Box box(Vec3(0.4f, 0.4f, 0.4f));
                 //box.transform.pos = Vec3(0.8f + dist(rng), 0 + dist(rng), 5.0f);
-                box.transform.pos = Vec3(0.8f, 0, 5.0f);
+                box.transform.pos = Vec3(0.0f, 0, 5.0f);
                 box.velocity = Vec3(0.0f, 0, 0);
                 physics.add(box);
             } else if (event.key.code == sf::Keyboard::Num9) {
@@ -365,6 +370,22 @@ void doEvents() {
 }
 
 int main (int argc, char **argv) {
+/*
+    Quat quaternion = Quat::FromAxisAngle(0, 1, 0, 3.1416f * 0.5f);
+    Ternion ternion = Ternion::FromAxisAngle(0, 1, 0, 3.1416f * 0.5f);
+    Tensor tensor(ternion);
+    
+    Vec3 vector(0.77,1.32,-0.32);
+    
+    Vec3 rotatedTernion = ternion * vector;
+    Vec3 rotatedTensor = tensor * vector;
+    Vec3 rotatedQuaternion = quaternion.Transform(vector);
+    
+    printf("rotated ternion: %.*e, %.*e, %.*e\n", rotatedTernion[0], rotatedTernion[1], rotatedTernion[2]);
+    printf("rotated tensor: %.*e, %.*e, %.*e\n", rotatedTensor[0], rotatedTensor[1], rotatedTensor[2]);
+    printf("rotated quaternion: %.*e, %.*e, %.*e\n", rotatedQuaternion[0], rotatedQuaternion[1], rotatedQuaternion[2]);
+*/
+
     loadEmptyScene();
 
     window.create(sf::VideoMode(camera.windowX, camera.windowY), "Mini3d Physics", sf::Style::Default, sf::ContextSettings(32));

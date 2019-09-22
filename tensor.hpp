@@ -2,7 +2,7 @@
 // This file is part of Mini3D <www.mini3d.org>
 // It is distributed under the MIT Software License <www.mini3d.org/license.php>
 
-/*
+
 #ifndef MINI3D_MATH_TENSOR_H
 #define MINI3D_MATH_TENSOR_H
 
@@ -22,8 +22,8 @@ namespace math {
 
 class Tensor {
 public:
-    float R[9];
-    
+    union { Vec3 R[9]; Vec3 v[3]; };
+
     Tensor(const Ternion r) {
         float p = r[0] * r[0] + r[1] * r[1] + r[2] * r[2];
         float b = (1.0f - p) * 0.5f;
@@ -40,14 +40,11 @@ public:
         R[8] = c * (r[2] * r[2] + b);
     }
     
-    Vec3 rotate(const Vec3 vector) {
-        
-    }
-
+    
+    inline const Vec3 operator *(const Vec3 &v) const                           { return Vec3(v.Dot(this->v[0]), v.Dot(this->v[1]), v.Dot(this->v[2])); }
 };
-
 }
 }
 
 #endif
-*/
+

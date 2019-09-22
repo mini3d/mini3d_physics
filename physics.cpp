@@ -99,9 +99,8 @@ struct Contact {
     float sleepTimer;
 
     float friction;
-    float restitution;
-    
     float velocityBias;
+    float normalVelocity;
 
     Vec3 n[NORMALS_COUNT];
 
@@ -139,7 +138,6 @@ struct Manifold {
 };
 
 list<Manifold> manifolds;
-
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -699,7 +697,7 @@ void doContacts(Manifold &manifold) {
     if ((a.sleepTimer > 0.0f || a.isFixed()) && (b.sleepTimer > 0.0f || b.isFixed())) {
         return;
     }
-
+    
     size_t contactsCount = 0;
     array<Contact, 8> contacts;
 
@@ -827,7 +825,7 @@ void doContacts(Manifold &manifold) {
             contact.impulse[NORMAL] = oldContact.impulse[NORMAL];
             contact.impulse[TANGENT] = oldContact.impulse[TANGENT];
             contact.impulse[BINORMAL] = oldContact.impulse[BINORMAL];
-            contact.correction = oldContact.correction;
+            //contact.correction = oldContact.correction;
             contact.velocityBias = oldContact.velocityBias;
         } else {
             //printf("no match: %p\n", &cp);
@@ -854,6 +852,7 @@ void applyImpulse(Body &a, float i, Vec3 &n, Vec3 &I) {
     a.velocity += i * a.invMass * n;
     a.angularVelocity += i * I;
 }
+
 void applyImpulse(Body &a, Body &b, float i, Vec3 &n, Vec3 &Ia, Vec3 &Ib)       { applyImpulse(a, -i, n, Ia); applyImpulse(b, i, n, Ib); }
 
 float bodySign(size_t b) { return b == FIRST ? -1.0f : 1.0f; }
@@ -872,7 +871,6 @@ void preSolveManifold(Manifold &manifold) {
         float frictionIncrease = 1.0f + 0.2f * (a.sleepTimer > 0.0f && b.sleepTimer > 0.0f);
         
         contact.friction = sqrtf(a.friction * b.friction * frictionIncrease);
-        contact.restitution = max(a.restitution, b.restitution);
 
         for (int n = NORMAL; n < NORMALS_COUNT; ++n) {
             
@@ -889,7 +887,11 @@ void preSolveManifold(Manifold &manifold) {
 
         Vec3 vRel = calculateVelocity(b, contact.pos[SECOND]) - calculateVelocity(a, contact.pos[FIRST]);
         float velocity = vRel.Dot(contact.n[NORMAL]);
-        contact.velocityBias = velocity < Physics::RESTITUTION_VELOCITY_THRESHOLD ? -velocity * contact.restitution : 0.0f;
+
+        float restitution = max(a.restitution, b.restitution);
+
+        contact.normalVelocity = velocity;
+        contact.velocityBias = velocity < Physics::RESTITUTION_VELOCITY_THRESHOLD ? -velocity * restitution : 0.0f;
     }
 }
 
@@ -899,6 +901,10 @@ void warmStart(Manifold &manifold) {
 
     for (int i = 0; i < manifold.contactsCount; ++i) {
         auto &contact = manifold.contacts[i];
+
+        contact.impulse[TANGENT] *= 0.99f;
+        contact.impulse[BINORMAL] *= 0.99f;
+        contact.correction = 0.0f;
 
         applyImpulse(a, b, contact.impulse[NORMAL], contact.n[NORMAL], contact.inertia[FIRST][NORMAL], contact.inertia[SECOND][NORMAL]);
         applyImpulse(a, b, contact.impulse[TANGENT], contact.n[TANGENT], contact.inertia[FIRST][TANGENT], contact.inertia[SECOND][TANGENT]);
@@ -916,10 +922,11 @@ void solveVelocities(Manifold &manifold, size_t iteration, float timeStep) {
     for (int i = 0; i < Physics::MANIFOLD_SOLVER_ITERATIONS; ++i) {
         manifold.isFixed = manifold.contactsCount > 0;
 
+        // Tangent and binormal
+        // TODO: Apply max friction to resultant vector of normal and bitangent friction (can't apply componentwise like we do now!)
+
         for (int i = 0; i < manifold.contactsCount; ++i) {
             auto &contact = manifold.contacts[i];
-            // Tangent and binormal
-            // TODO: Apply max friction to resultant vector of normal and bitangent friction (can't apply componentwise like we do now!)
 
             for (int n = TANGENT; n <= BINORMAL; ++n) {
                 float maxFriction = contact.friction * contact.impulse[NORMAL];
@@ -930,7 +937,7 @@ void solveVelocities(Manifold &manifold, size_t iteration, float timeStep) {
                 const float targetVelocity = 0.0f;
                 float impulse = (targetVelocity - velocity) * contact.mass[n];
 
-                float sum = impulse + contact.impulse[n];
+                float sum = impulse + contact.impulse[n] * 0.99f;
                 if (abs(sum) > maxFriction || abs(sum) > maxFriction) {
                     manifold.isFixed = false;
                 }
@@ -941,7 +948,12 @@ void solveVelocities(Manifold &manifold, size_t iteration, float timeStep) {
                 float delta = clampedImpulse - oldImpulse;
                 applyImpulse(a, b, delta, contact.n[n], contact.inertia[FIRST][n], contact.inertia[SECOND][n]);
             }
+        }
+
+        for (int i = 0; i < manifold.contactsCount; ++i) {
+            auto &contact = manifold.contacts[i];
             
+            // Normal impulse
             float oldImpulse = contact.impulse[NORMAL];
 
             Vec3 vRel = calculateVelocity(b, contact.pos[SECOND]) - calculateVelocity(a, contact.pos[FIRST]);
@@ -963,37 +975,35 @@ void solveVelocities(Manifold &manifold, size_t iteration, float timeStep) {
 }
 
 void solvePosition(Manifold &manifold) {
+    for (int i = 0; i < Physics::MANIFOLD_SOLVER_ITERATIONS; ++i) {
+        for (int i = 0; i < manifold.contactsCount; ++i) {
+            auto &contact = manifold.contacts[i];
 
-    bool firstIsAbove = manifold.body[FIRST]->transform.pos.z > manifold.body[FIRST]->transform.pos.z;
-    
-    for (int i = 0; i < manifold.contactsCount; ++i) {
-        auto &contact = manifold.contacts[i];
+            Vec3 dRel = (manifold.body[SECOND]->transform * contact.pos0[SECOND]) - (manifold.body[FIRST]->transform * contact.pos0[FIRST]);
 
-        Vec3 dRel = (manifold.body[SECOND]->transform * contact.pos0[SECOND]) - (manifold.body[FIRST]->transform * contact.pos0[FIRST]);
+            float oldCorrection = contact.correction;
+            float distance = dRel.Dot(contact.n[NORMAL]);
+            const float targetDistance = 0.0f;
 
-        float oldCorrection = contact.correction;
-        float distance = dRel.Dot(contact.n[NORMAL]);
-        const float targetDistance = 0.0f;
-    
-        float correction = 0.5f * (targetDistance - distance) * contact.mass[NORMAL];
+            float correction = 0.5f * (targetDistance - distance) * contact.mass[NORMAL];
 
-        float sum = correction + contact.correction;
-        
-        // Allow objects to slightly sink into each other in the direciton of gravity for stable stacks
-        float gravityDireciton = contact.n[NORMAL].Dot(Vec3(0,0,1));
-        float clampedCorrection = max(sum, 0.1f * sum * gravityDireciton * gravityDireciton);
+            float sum = correction + contact.correction;
+            
+            // Allow objects to slightly sink into each other in the direciton of gravity for stable stacks
+            float gravityDireciton = contact.n[NORMAL].Dot(Vec3(0,0,1));
+            float clampedCorrection = max(sum, -contact.impulse[NORMAL]);
+            
+            contact.correction = clampedCorrection;
+            float delta = clampedCorrection - oldCorrection;
+            
+            manifold.body[FIRST]->transform.pos -= contact.n[NORMAL] * delta * manifold.body[FIRST]->invMass;
+            manifold.body[SECOND]->transform.pos += contact.n[NORMAL] * delta * manifold.body[SECOND]->invMass;
 
-        contact.correction = clampedCorrection;
-        float delta = clampedCorrection - oldCorrection;
-        
-        manifold.body[FIRST]->transform.pos -= contact.n[NORMAL] * delta * manifold.body[FIRST]->invMass;
-        manifold.body[SECOND]->transform.pos += contact.n[NORMAL] * delta * manifold.body[SECOND]->invMass;
-
-        manifold.body[FIRST]->transform.rot = Ternion(-delta * contact.inertia[FIRST][NORMAL]) * manifold.body[FIRST]->transform.rot;
-        manifold.body[SECOND]->transform.rot = Ternion(delta * contact.inertia[SECOND][NORMAL]) * manifold.body[SECOND]->transform.rot;
+            manifold.body[FIRST]->transform.rot = 0.5f * Ternion(-delta * contact.inertia[FIRST][NORMAL]) * manifold.body[FIRST]->transform.rot;
+            manifold.body[SECOND]->transform.rot = 0.5f * Ternion(delta * contact.inertia[SECOND][NORMAL]) * manifold.body[SECOND]->transform.rot;
+        }
     }
 }
-
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -1133,6 +1143,22 @@ void drawPoint(GLint color, const Vec3& point, GLfloat size) {
     glEnable(GL_LIGHTING);
 }
 
+void drawLine(Vec3 v0, Vec3 v1, GLint color, float width) {
+    glDisable(GL_LIGHTING);
+    setColor(color);
+    glLineWidth(width);
+    glBegin(GL_LINES);
+        glVertex3fv(v0);
+        glVertex3fv(v1);
+    glEnd();
+    glEnable(GL_LIGHTING);
+}
+
+void drawLine(Vec3 v0, Vec3 v1, GLint color) {
+    drawLine(v0, v1, color, 2.0f);
+}
+
+
 void Physics::drawManifolds() {
     for (auto &manifold : manifolds) {
         auto a = manifold.body[FIRST];
@@ -1147,10 +1173,45 @@ void Physics::drawManifolds() {
                 color += ((int)(max(0.0f, contact.impulse[BINORMAL]) * 5000000.0f)) << 24;
                 */
             
-            int color = (manifold.isFixed) ? 0xFF0000FF : color2;
+            int color = color2;
             
             drawPoint(color, a->transform * contact.pos0[FIRST], 15.0f);
             drawPoint(color, b->transform * contact.pos0[SECOND], 15.0f);
+        }
+    }
+}
+
+void Physics::drawDebug() {
+    
+    for (auto &manifold : manifolds) {
+        auto a = manifold.body[FIRST];
+        auto b = manifold.body[SECOND];
+        for (int i = 0; i < manifold.contactsCount; i++) {
+            auto &contact = manifold.contacts[i];
+            int intensity = max(min(255, (int)(abs(contact.impulse[NORMAL]) * 100000.0f)), 0);
+            int color2 = (intensity << 16) + (intensity << 8) + (intensity << 24);
+            /*
+            int color = ((int)(max(0.0f, contact.impulse[NORMAL]) * 100000.0f)) << 16;
+                color += ((int)(max(0.0f, contact.impulse[TANGENT]) * 5000000.0f)) << 8;
+                color += ((int)(max(0.0f, contact.impulse[BINORMAL]) * 5000000.0f)) << 24;
+                */
+            
+            int color = color2;
+            float mul = 1.0f;
+            
+            if (contact.n[NORMAL].z < -0.8f) {
+                color = 0xFFFF00FF;
+                mul = -1.0f;
+            }
+            
+            drawPoint(color, a->transform * contact.pos0[FIRST], 15.0f);
+            drawPoint(color, b->transform * contact.pos0[SECOND], 15.0f);
+            drawLine(a->transform * contact.pos0[FIRST], a->transform * contact.pos0[FIRST] + (
+            contact.n[NORMAL] * contact.impulse[NORMAL] * mul +
+            contact.n[TANGENT] * contact.impulse[TANGENT] +
+            contact.n[BINORMAL] * contact.impulse[BINORMAL]
+            )* 10000.0f, color);
+
         }
     }
 }
@@ -1160,7 +1221,7 @@ void Physics::step(float timeStep, const Physics::CollisionCallbacks &callback) 
     if (paused) {
         return;
     }
-
+    
     // Update velocities
     const Vec3 gravity(0.0f, 0.0f, -GRAVITY);
     for (auto &body : bodies) {
@@ -1268,7 +1329,7 @@ void Physics::step(float timeStep, const Physics::CollisionCallbacks &callback) 
                     body->isAwake = true;
                 }
             }
-            
+
             // Solve island
             for (auto* manifold : islandManifolds) {
                 if (manifold->body[FIRST]->isAwake || manifold->body[SECOND]->isAwake) {
@@ -1300,13 +1361,6 @@ void Physics::step(float timeStep, const Physics::CollisionCallbacks &callback) 
                 */
             }
 
-            // Position Solver
-            for (int k = 0; k < POSITION_SOLVER_ITERATIONS; k++) {
-                for (auto* manifold : islandManifolds) {
-                    solvePosition(*manifold);
-                }
-            }
-
             // Put island to sleep
             if (ENABLE_SLEEPING) {
                 float sleepTimer = FLT_MAX;
@@ -1317,12 +1371,13 @@ void Physics::step(float timeStep, const Physics::CollisionCallbacks &callback) 
                     body->sleepTimer = isNotMoving && isNotRotating ? body->sleepTimer + timeStep : 0;
                     sleepTimer = min(sleepTimer, body->sleepTimer);
                 }
-
+/*
                 if (sleepTimer > 60.0f) {
                     for(auto* body : islandBodies) {
                         body->isAwake = false;
                     }
                 }
+*/
             }
         }
     }
@@ -1332,6 +1387,13 @@ void Physics::step(float timeStep, const Physics::CollisionCallbacks &callback) 
         if (!body.isFixed() && body.isAwake && body.sleepTimer == 0) {
             body.transform.pos += body.velocity * timeStep;
             body.transform.rot = 0.5f * timeStep * Ternion(body.angularVelocity) * body.transform.rot;
+        }
+    }
+    
+    // Position Solver
+    for (int k = 0; k < POSITION_SOLVER_ITERATIONS; k++) {
+        for (auto &manifold : manifolds) {
+            solvePosition(manifold);
         }
     }
 }

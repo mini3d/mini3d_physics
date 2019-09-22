@@ -1,0 +1,86 @@
+
+
+
+if (manifold.contactsCount > 0) {
+    auto &contact = manifold.frictionContact;
+    for (int n = TANGENT; n < NORMALS_COUNT; ++n) {
+
+        Vec3 localNormalA = a.transform.rotateInv(contact.n[n]);
+        contact.inertia[FIRST][n] = a.transform.rotate(a.invInertia * contact.pos0[FIRST].Cross(localNormalA));
+
+        Vec3 localNormalB = b.transform.rotateInv(contact.n[n]);
+        contact.inertia[SECOND][n] = b.transform.rotate(b.invInertia * contact.pos0[SECOND].Cross(localNormalB));
+
+        contact.mass[n] = 1.0f / (
+                a.invMass + contact.inertia[FIRST][n].Cross(contact.pos[FIRST]).Dot(contact.n[n]) +
+                b.invMass + contact.inertia[SECOND][n].Cross(contact.pos[SECOND]).Dot(contact.n[n]));
+    }
+}
+
+
+
+if (contactsCount > 0) {
+        manifold.frictionContact.pos[0] = Vec3(0,0,0);
+        manifold.frictionContact.pos[1] = Vec3(0,0,0);
+        manifold.frictionContact.pos0[0] = Vec3(0,0,0);
+        manifold.frictionContact.pos0[1] = Vec3(0,0,0);
+
+    for (int i = 0; i < manifold.contactsCount; i++) {
+        manifold.frictionContact.pos[0] += manifold.contacts[i].pos[0];
+        manifold.frictionContact.pos[1] += manifold.contacts[i].pos[1];
+        manifold.frictionContact.pos0[0] += manifold.contacts[i].pos0[0];
+        manifold.frictionContact.pos0[1] += manifold.contacts[i].pos0[1];
+    }
+    
+    manifold.frictionContact.pos[0] /= manifold.contactsCount;
+    manifold.frictionContact.pos[1] /= manifold.contactsCount;
+    manifold.frictionContact.pos0[0] /= manifold.contactsCount;
+    manifold.frictionContact.pos0[1] /= manifold.contactsCount;
+    
+    manifold.frictionContact.n[NORMAL] = normal;
+    manifold.frictionContact.n[TANGENT] = tangent;
+    manifold.frictionContact.n[BINORMAL] = bitangent;
+
+} else {
+    manifold.frictionContact.impulse[TANGENT] = 0.0f;
+    manifold.frictionContact.impulse[BINORMAL] = 0.0f;
+}
+
+
+/*
+        if (manifold.contactsCount > 0) {
+            // Do friction
+            Contact &contact = manifold.frictionContact;
+            for (int n = TANGENT; n <= BINORMAL; ++n) {
+                float maxFriction = contact.friction * sumNormalImpulse;
+                float oldImpulse = contact.impulse[n];
+
+                Vec3 vRel = calculateVelocity(b, contact.pos[SECOND]) - calculateVelocity(a, contact.pos[FIRST]);
+                float velocity = vRel.Dot(contact.n[n]);
+                const float targetVelocity = 0.0f;
+                float impulse = (targetVelocity - velocity) * contact.mass[n];
+
+                float sum = impulse + contact.impulse[n];
+                if (abs(sum) > maxFriction || abs(sum) > maxFriction) {
+                    manifold.isFixed = false;
+                }
+
+                float clampedImpulse = max(min(sum, maxFriction), -maxFriction);
+                
+                contact.impulse[n] = clampedImpulse;
+                float delta = clampedImpulse - oldImpulse;
+                applyImpulse(a, b, delta, contact.n[n], contact.inertia[FIRST][n], contact.inertia[SECOND][n]);
+            }
+  */
+            
+            // Rotational friction
+            /*
+            Vec3 vRelRot = b.angularVelocity.Cross(manifold.contacts[0].pos[SECOND]) - a.angularVelocity.Cross(contact.pos[FIRST]);
+            float velocity = vRel.Dot(contact.n[TANGENT]);
+            const float targetVelocity = 0.0f;
+            float impulse = (targetVelocity - velocity) * contact.mass[n];
+            */
+//        }
+        
+
+        //float rotation =
