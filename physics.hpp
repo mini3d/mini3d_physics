@@ -47,6 +47,9 @@ static constexpr float BODY_SLEEP_TIME = 10.0f;
 static constexpr float BODY_SLEEP_LINEAR_VELOCITY_THRESHOLD =  0.00000005f;
 static constexpr float BODY_SLEEP_ANGULAR_VELOCITY_THRESHOLD = 0.00000005f;
 
+// GEOMETRY
+static constexpr size_t MAX_FACE_VERTEX_COUNT = 32;
+
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //
 // ARRAYS
@@ -57,9 +60,6 @@ static constexpr float BODY_SLEEP_ANGULAR_VELOCITY_THRESHOLD = 0.00000005f;
 list<Body> bodies;
 vector<MouseConstraint> joints;
 int iterations = 0;
-
-Physics();
-
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //

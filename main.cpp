@@ -245,7 +245,7 @@ void display() {
     auto end = std::chrono::high_resolution_clock::now();
     auto microseconds = std::chrono::duration_cast<std::chrono::microseconds>(end-start).count();
     
-    cout << "Frame time: " << microseconds << endl;
+    //cout << "Frame time: " << microseconds << endl;
     for (auto& body : physics.bodies) {
         draw(body);
     }

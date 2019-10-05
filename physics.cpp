@@ -90,7 +90,7 @@ struct Simplex {
 struct ClipPoint { Vec3 p; uint8_t index; uint8_t clipIndex; };
 
 struct Contact {
-    ClipPoint clipPoint;
+    Vec3 clipPoint;
     Vec3 pos[COLLISION_PARTIES_COUNT];
     Vec3 pos0[COLLISION_PARTIES_COUNT];
     Vec3 inertia[COLLISION_PARTIES_COUNT][NORMALS_COUNT];
@@ -552,7 +552,7 @@ void doGJK(const Transform &tfa, const Transform &tfb, const Hull &hull, const H
         
         // Distance to closest point on simplex must be strictly decreasing unless we have found the best simplex
         // Make sure we make decent progress each step. Otherwise we are probably stuck in a loop.
-        if (minDistance < distanceToSimplex) {
+        if (minDistance * 0.99f < distanceToSimplex) {
             steps[i]++;
             return;
         } else {
@@ -592,150 +592,121 @@ void doGJK(const Transform &tfa, const Transform &tfb, const Hull &hull, const H
 //
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-size_t replace = 0; // TODO: remove
-
-void generateClipPointsFromFace(vector<ClipPoint> &result, const Body &body, const Face &clippingPlane, const size_t index) {
-    const Transform &transform = body.transform;
-    const Hull &hull = body.hull;
-
-    uint8_t i = 0;
-    for(auto vertexIndex : hull.faceVertices[index]) {
-        Vec3 point = clippingPlane.projection(transform * hull.vertices[vertexIndex]);
-        result.push_back({ point, i++, UINT8_MAX });
-    };
+size_t generateClipPointsFromFace(Vec3 *clip, const Body &body, const Face &clippingPlane, const size_t index) {
+    size_t count = 0;
+    for(auto vertexIndex : body.hull.faceVertices[index]) {
+        clip[count++] = clippingPlane.projection(body.transform * body.hull.vertices[vertexIndex]);
+    }
+    return count;
 }
 
-vector<ClipPoint> temp;
-
 // Clip the incident polygon agains the reference polygon
-void polygonPolygonClipping(vector<ClipPoint> &subject, vector<ClipPoint> &reference, const Face &clipPlane) {
-    float sign = std::copysign(1, (reference[2].p - reference[1].p).Cross(reference[0].p - reference[1].p).Dot(clipPlane.normal));
+void polygonPolygonClipping(Vec3 *sub, size_t &subCount, Vec3 *ref, size_t &refCount, const Vec3 normal) {
+    float sign = std::copysign(1, (ref[2] - ref[1]).Cross(ref[0] - ref[1]).Dot(normal));
 
-    uint8_t clipIndex = 0;
-    ClipPoint c1 = reference.back();
-    for (const auto &c2 : reference ) {
-        Vec3 clipEdgeNormal = sign * (c2.p - c1.p).Cross(clipPlane.normal);
+    size_t tmpCount = 0;
+    Vec3 tmp[Physics::MAX_FACE_VERTEX_COUNT];
+    
+    Vec3 r1 = ref[refCount - 1];
+    for (int i = 0; i < refCount; ++i) {
+        Vec3 r2 = ref[i];
 
-        temp.clear();
-
-        const ClipPoint* start = &subject.back();
-        float dStart = (start->p - c1.p).Dot(clipEdgeNormal);
-        
-        for(const auto &end : subject) {
-            float dEnd = (end.p - c1.p).Dot(clipEdgeNormal);
+        tmpCount = 0;
+        Vec3 clipEdgeNormal = sign * (r2 - r1).Cross(normal);
+        Vec3 start = sub[subCount -1];
+        float dStart = (start - r1).Dot(clipEdgeNormal);
+        for (int j = 0; j < subCount; ++j) {
+            Vec3 end = sub[j];
+            float dEnd = (end - r1).Dot(clipEdgeNormal);
 
             // If start and end point are on different sides of the clipping edge,
             // add the clipping plane intersection point to the output
             if (dStart * dEnd < 0) {
-                Vec3 p = Vec3::Interpolated(start->p, end.p, abs(dStart), abs(dEnd));
-                temp.push_back({ p, start->index, clipIndex });
+                tmp[tmpCount++] = Vec3::Interpolated(start, end, abs(dStart), abs(dEnd));
             }
         
             // If end point is inside polygon, add it to the output
             if (dEnd <= 0) {
-                temp.push_back(end);
+                tmp[tmpCount++] = end;
             }
             
-            start = &end;
+            start = end;
             dStart = dEnd;
         }
-        subject = temp;
-        c1 = c2;
+        
+        for (int j = 0; j < tmpCount; ++j) {
+            sub[j] = tmp[j];
+        }
+        
+        subCount = tmpCount;
+        r1 = r2;
     }
 }
 
-void reduceContacts(const Manifold* manifold, const Vec3 &normal, const Face &faceA, const Face &faceB, vector<ClipPoint> &clipPoints, vector<ClipPoint> &clipPointsA) {
+void swap(Vec3 *sub, size_t i, size_t j) { Vec3 tmp = sub[i]; sub[i] = sub[j]; sub[j] = tmp; }
 
-    clipPoints.clear();
+void reduceContacts(Vec3 *sub, size_t &subCount, const Vec3 &normal, const Face &faceAWorld, const Face &faceBWorld) {
 
-    // TODO: Make pointers instead
-    Body &a = *manifold->body[FIRST];
-    Body &b = *manifold->body[SECOND];
+    if (subCount <= 0) return;
 
-    // Get depest point
-    if (clipPointsA.size() > 0) {
-        ClipPoint* best = nullptr;
-        float maxDistance = FLT_MAX;
-        for (auto & cp : clipPointsA) {
-            Vec3 posA = cp.p - (cp.p - a.transform * faceA.pos).Dot(a.transform.rotate(faceA.normal)) * a.transform.rotate(faceA.normal) + Physics::COLLISION_OFFSET * normal;
-            Vec3 posB = cp.p - (cp.p - b.transform * faceB.pos).Dot(b.transform.rotate(faceB.normal)) * b.transform.rotate(faceB.normal) - Physics::COLLISION_OFFSET * normal;
+    // Keep the deepest point
+    float maxDistance = -FLT_MAX;
+    for (int i = 0; i < subCount; ++i) {
+        Ray ray = { sub[i], normal };
+        Vec3 posA = faceAWorld.intersection(ray);
+        Vec3 posB = faceBWorld.intersection(ray);
 
-            float distance = -(posB - posA).Dot(normal);
-            if (distance < maxDistance) {
-                maxDistance = distance;
-                best = &cp;
-            }
+        float distance = (posB - posA).Dot(normal);
+        if (distance < maxDistance) {
+            maxDistance = distance;
+            swap(sub, i, 0);
         }
-        clipPoints.push_back(*best);
     }
+
+    if (subCount <= 1) return;
 
     // Get point furthest from first point
-    if (clipPointsA.size() > 1) {
-        ClipPoint* best = nullptr;
-        
-        // TODO: Set to zero and check result
-        float maxDistance = -FLT_MAX;
-
-        for (auto & cp : clipPointsA) {
-            float distance = (clipPoints[0].p - cp.p).Norm();
-            if (distance > maxDistance) {
-                maxDistance = distance;
-                best = &cp;
-            }
+    maxDistance = -FLT_MAX;
+    for (int i = 1; i < subCount; ++i) {
+        float distance = (sub[0] - sub[i]).Norm();
+        if (distance > maxDistance) {
+            maxDistance = distance;
+            swap(sub, i, 1);
         }
-        
-        clipPoints.push_back(*best);
     }
+
+    if (subCount <= 2) return;
 
     // Get the largest triangle
-    Vec3 maxCross;
-    if (clipPointsA.size() > 2) {
-        ClipPoint* best = nullptr;
-        Vec3 v1 = clipPoints[1].p - clipPoints[0].p;
-        
-        // TODO: Set to zero and check result
-        float maxDistance = -FLT_MAX;
-
-        for (auto & cp : clipPointsA) {
-            Vec3 cross = (clipPoints[0].p - cp.p).Cross(v1);
-            float distance = cross.Norm();
-            if (distance > maxDistance) {
-                maxDistance = distance;
-                maxCross = cross;
-                best = &cp;
-            }
+    maxDistance = -FLT_MAX;
+    for (int i = 2; i < subCount; ++i) {
+        float distance = ((sub[0] - sub[i]).Cross(sub[0] - sub[1])).Norm();
+        if (distance > maxDistance) {
+            maxDistance = distance;
+            swap(sub, i, 2);
         }
-        
-        clipPoints.push_back(*best);
     }
-
+        
+    if (subCount <= 3) return;
+    
     // Get the largest triangle that attaches to the original triangle
-    if (clipPointsA.size() > 3) {
-        ClipPoint* best = nullptr;
-        Vec3 v[3] = {
-                clipPoints[1].p - clipPoints[0].p,
-                clipPoints[2].p - clipPoints[1].p,
-                clipPoints[0].p - clipPoints[2].p
-        };
-
-        // TODO: Set to zero and check result
-        float maxDistance = -FLT_MAX;
-
-        for (auto & cp : clipPointsA) {
-            for (int i = 0; i < 3; ++i) {
-                Vec3 cross = (clipPoints[i].p - cp.p).Cross(v[i]);
+    Vec3 v[3] = { sub[1] - sub[0], sub[2] - sub[1], sub[0] - sub[2] };
+    Vec3 firstCross = (sub[0] - sub[2]).Cross(sub[1] - sub[0]); // Winding of first triangle
+    maxDistance = -FLT_MAX;
+    for (int i = 3; i < subCount; ++i) {
+        for (int j = 0; j < 3; ++j) {
+            Vec3 cross = (sub[j] - sub[i]).Cross(v[j]);
+            if (cross.Dot(firstCross) < 0) {
                 float distance = cross.Norm();
-                if (cross.Dot(maxCross) < 0 && distance > maxDistance) {
+                if (distance > maxDistance) {
                     maxDistance = distance;
-                    best = &cp;
+                    swap(sub, i, 3);
                 }
             }
         }
-        
-        if (best != nullptr) {
-            clipPoints.push_back(*best);
-        }
     }
+    
+    subCount = 4;
 }
 
 size_t findFace(const Hull &hull, const Vec3 &normal) {
@@ -743,17 +714,6 @@ size_t findFace(const Hull &hull, const Vec3 &normal) {
     auto it = max_element(faces.begin(), faces.end(),
             [&](const Face &a, const Face &b) { return a.normal.Dot(normal) > b.normal.Dot(normal); });
     return (size_t)(it - faces.begin());
-}
-
-vector<ClipPoint> clipPointsA;
-vector<ClipPoint> clipPointsB;
-vector<ClipPoint> clipPoints;
-
-Physics::Physics() {
-    clipPointsA.reserve(100);
-    clipPointsB.reserve(100);
-    clipPoints.reserve(100);
-    temp.reserve(100);
 }
 
 void doContacts(Manifold &manifold, int iterations) {
@@ -765,9 +725,6 @@ void doContacts(Manifold &manifold, int iterations) {
     if ((a.sleepTimer > 0.0f || a.isFixed()) && (b.sleepTimer > 0.0f || b.isFixed())) {
         return;
     }
-
-    size_t contactsCount = 0;
-    array<Contact, 8> contacts;
 
     Vec3 axis = manifold.axis;
 
@@ -816,44 +773,41 @@ void doContacts(Manifold &manifold, int iterations) {
     Vec3 bitangent = normal.Cross(tangent);
 
     // Create the polygon of face A in the collision plane P
-    clipPointsA.clear();
-    clipPointsB.clear();
+    Vec3 sub[Physics::MAX_FACE_VERTEX_COUNT];
+    Vec3 ref[Physics::MAX_FACE_VERTEX_COUNT];
     
-    
-    generateClipPointsFromFace(clipPointsA, a, clipPlane, faceIndexA);
-    generateClipPointsFromFace(clipPointsB, b, clipPlane, faceIndexB);
+    size_t subCount = generateClipPointsFromFace(sub, a, clipPlane, faceIndexA);
+    size_t refCount = generateClipPointsFromFace(ref, b, clipPlane, faceIndexB);
 
-    polygonPolygonClipping(clipPointsA, clipPointsB, clipPlane);
+    polygonPolygonClipping(sub, subCount, ref, refCount, clipPlane.normal);
 
-    for(auto it = clipPointsA.begin(); it != clipPointsA.end(); ) {
-        Vec3 posA = it->p - (it->p - a.transform * faceA.pos).Dot(a.transform.rotate(faceA.normal)) * a.transform.rotate(faceA.normal) + Physics::COLLISION_OFFSET * normal;
-        Vec3 posB = it->p - (it->p - b.transform * faceB.pos).Dot(b.transform.rotate(faceB.normal)) * b.transform.rotate(faceB.normal) - Physics::COLLISION_OFFSET * normal;
+    Face faceAWorld = a.transform * faceA;
+    Face faceBWorld = b.transform * faceB;
+
+    reduceContacts(sub, subCount, normal, faceAWorld, faceBWorld);
+
+    size_t contactsCount = 0;
+    array<Contact, 8> contacts;
+
+    for (int i = 0; i < subCount; ++i) {
+        Vec3 cp = sub[i];
+
+        Ray ray = { cp, normal };
+        Vec3 posA = faceAWorld.intersection(ray) + Physics::COLLISION_OFFSET * normal;
+        Vec3 posB = faceBWorld.intersection(ray) - Physics::COLLISION_OFFSET * normal;
 
         float distance = (posB - posA).Dot(normal);
         
+        // Remove clip points that are too far apart
+
         if (distance > Physics::SLOP) {
-            it = clipPointsA.erase(it);
-        } else {
-            it++;
-        }
-    }
-
-    // Clip point reduction
-    reduceContacts(&manifold, normal, faceA, faceB, clipPoints, clipPointsA);
-
-    for (auto & cp : clipPoints) {
-        Contact &contact = contacts[contactsCount++];
-        contact.clipPoint = cp;
-        
-        Vec3 posA = cp.p - (cp.p - a.transform * faceA.pos).Dot(a.transform.rotate(faceA.normal)) * a.transform.rotate(faceA.normal) + Physics::COLLISION_OFFSET * normal;
-        Vec3 posB = cp.p - (cp.p - b.transform * faceB.pos).Dot(b.transform.rotate(faceB.normal)) * b.transform.rotate(faceB.normal) - Physics::COLLISION_OFFSET * normal;
-
-        float distance = (posB - posA).Dot(normal);
-        
-        if (distance > Physics::SLOP) {
-            --contactsCount;
+            sub[i] = sub[--subCount];
+            --i;
             continue;
         }
+
+        Contact &contact = contacts[contactsCount++];
+        contact.clipPoint = cp;
 
         contact.distance = distance;
         contact.isSleeping = false;
@@ -900,11 +854,7 @@ void doContacts(Manifold &manifold, int iterations) {
         }
 
     }
-
-    if (contactsCount > 0) {
-        //printf("axis: (%f, %f, %f)\n", axis.x, axis.y, axis.z);
-    }
-
+    
     manifold.contacts = contacts;
     manifold.contactsCount = contactsCount;
 }
@@ -1083,7 +1033,7 @@ void solvePosition(Manifold &manifold) {
             // Pull objects apart if there is penetration and pull objects toghether
             // to make surfaces align. Only pull the surfaces toghether when there is
             // an impulse in the normal direction to avoid objects sticking together like glue.
-            float clampedCorrection = max(sum, 0.0f); //min(0.0f, 100.0f * -contact.impulse[NORMAL] * contact.mass[NORMAL]));
+            float clampedCorrection = max(sum, min(0.0f, 1000.0f * -contact.impulse[NORMAL] * contact.mass[NORMAL]));
             
             contact.correction = clampedCorrection;
             float delta = clampedCorrection - oldCorrection;
@@ -1251,13 +1201,15 @@ void drawLine(Vec3 v0, Vec3 v1, GLint color) {
 }
 
 
+unsigned int colors[4] = { 0xFFFFFFFF, 0xFF0000FF, 0x00FF00FF, 0x0000FFFF };
+
 void Physics::drawManifolds() {
     for (auto &manifold : manifolds) {
         auto a = manifold.body[FIRST];
         auto b = manifold.body[SECOND];
         for (int i = 0; i < manifold.contactsCount; i++) {
             auto &contact = manifold.contacts[i];
-            int intensity = max(min(255, (int)(abs(contact.impulse[NORMAL]) * 100000.0f)), 0);
+            int intensity = max(min(255, (int)(abs(contact.distance * 10.0f))), 0);
             int color2 = (intensity << 16) + (intensity << 8) + (intensity << 24);
             /*
             int color = ((int)(max(0.0f, contact.impulse[NORMAL]) * 100000.0f)) << 16;
@@ -1267,13 +1219,14 @@ void Physics::drawManifolds() {
             
             int color = color2;
             
-            // drawPoint(color, a->transform * contact.pos0[FIRST], 15.0f);
-            // drawPoint(color, b->transform * contact.pos0[SECOND], 15.0f);
+            //drawPoint(color, a->transform * contact.pos0[FIRST], 15.0f);
+            //drawPoint(color, b->transform * contact.pos0[SECOND], 15.0f);
+            //drawLine(a->transform * contact.pos0[FIRST],a->transform * contact.pos0[FIRST] + manifold.axis * contact.distance, 0x00FFFFFF, 2.0f);
+
         }
 
-//        drawLine(a->transform.pos, a->transform.pos + manifold.axis * 5, 0x00FFFFFF, 2.0f);
-//        drawLine(b->transform.pos, b->transform.pos - manifold.axis * 5, 0x00FFFFFF, 2.0f);
-        
+        //drawLine(a->transform.pos, a->transform.pos + manifold.axis * 5, 0x00FFFFFF, 2.0f);
+        //drawLine(b->transform.pos, b->transform.pos - manifold.axis * 5, 0x00FFFFFF, 2.0f);
     }
 }
 
