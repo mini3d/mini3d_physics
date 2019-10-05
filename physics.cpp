@@ -123,11 +123,13 @@ struct Manifold {
     Body* body[COLLISION_PARTIES_COUNT];
 
     Simplex simplex;
+    SupportPoint sps[2];
+    int spsCount = 0;
 
     array<Contact, 8> contacts;
     size_t contactsCount;
     
-    Vec3 axis = Vec3(0,0,0);
+    Vec3 axis = Vec3(1,0,0);
     
     bool ignoreContacts = false;
     bool contactStartedCalled = false;
@@ -146,7 +148,7 @@ list<Manifold> manifolds;
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 bool testBroadPhaseProximity(const Body* a, const Body* b , const float timeStep) {
-    float radius = a->getRadius(timeStep) + b->getRadius(timeStep);
+    float radius = (a->getRadius(timeStep) + b->getRadius(timeStep)) * 1.2f;
     return (a->transform.pos.SquareDistance(b->transform.pos) <= radius * radius);
 }
 
@@ -311,7 +313,7 @@ int32_t xorshift32() {
 }
 
 // This is a last resort when EPA fails
-SupportPoint findSeparatingAxis(const Transform &tfa, const Transform &tfb, const Hull &hull, const Hull &hull2, Vec3 &bestAxis) {
+SupportPoint findSeparatingAxis(const Transform &tfa, const Transform &tfb, const Hull &hull, const Hull &hull2, Vec3 &bestAxis, SupportPoint sps[2], int &spsCount, Manifold &manifold) {
     // assert(false); // TODO: We dont want to end up here
     
     //TODO: Change this to just sample a fixed uniform set of direcitons instead!
@@ -319,6 +321,9 @@ SupportPoint findSeparatingAxis(const Transform &tfa, const Transform &tfb, cons
     SupportPoint bestSupportPoint = getSupport(tfa, tfb, hull, hull2, bestAxis);
     Fraction bestDistance = { -bestSupportPoint.p.Dot(bestAxis), bestAxis.Norm() };
 
+    Vec3 outwards = (tfb.pos - tfa.pos);
+
+/*
     Vec3 defaultAxis = (tfb.pos - tfa.pos).Norm() < Physics::COLLISION_EPSILON_SQUARED ? tfb.pos - tfa.pos : Vec3(0,1,0);
     SupportPoint defaultSupportPoint = getSupport(tfa, tfb, hull, hull2, defaultAxis);
     Fraction defaultDistance = { -defaultSupportPoint.p.Dot(defaultAxis), defaultAxis.Norm() };
@@ -326,15 +331,20 @@ SupportPoint findSeparatingAxis(const Transform &tfa, const Transform &tfb, cons
     bestAxis = defaultDistance < bestDistance ? bestAxis : defaultAxis;
     bestSupportPoint = defaultDistance < bestDistance ? bestSupportPoint : defaultSupportPoint;
     bestDistance = defaultDistance < bestDistance ? bestDistance : defaultDistance;
+*/
 
-    size_t iterations = 20;
+    size_t iterations = bestAxis == Vec3(2,0,0) ? 50 : 10;
+    
     // Search random directions.
+    size_t total = 0;
     for (int i = 0; i < iterations; ++i) {
+
         // Randomly try a different direction in the vicinity of bestDir
         // delta * delta * delta gives a distribution that is denser around bestDir
         Vec3 delta(xorshift32() / (float)INT32_MAX, xorshift32() / (float)INT32_MAX, xorshift32() / (float)INT32_MAX);
-        Vec3 newAxis = (bestAxis + delta * delta * delta * 0.5f).Normalized();
+        Vec3 newAxis = (bestAxis + 5.0f * delta * delta * delta * delta * delta).Normalized();
 
+        total++;
         SupportPoint newSupportPoint = getSupport(tfa, tfb, hull, hull2, newAxis);
         Fraction newDistance = { -newSupportPoint.p.Dot(newAxis), newAxis.Norm() };
 
@@ -342,9 +352,50 @@ SupportPoint findSeparatingAxis(const Transform &tfa, const Transform &tfb, cons
             bestAxis = newAxis;
             bestDistance = newDistance;
             bestSupportPoint = newSupportPoint;
+            i = 0;
         }
-    }
+/*
+        int path = 0;
+        if (spsCount == 0) {
+            sps[0] = newSupportPoint;
+            spsCount++;
+            continue;
+        } else if (spsCount == 1) {
+            if (sps[0].p == newSupportPoint.p) {
+                newAxis = -sps[0].p.Dir(-outwards).Normalized();
+                spsCount = 0;
+                path = 1;
+            } else {
+                sps[1] = newSupportPoint;
+                spsCount++;
+                continue;
+            }
+        } else if (spsCount == 2) {
+            if (sps[0].p == newSupportPoint.p || sps[1].p == newSupportPoint.p) {
+                newAxis = (sps[1].p - sps[0].p).Cross(-sps[1].p).Cross(sps[1].p - sps[0].p).Dir(outwards).Normalized();
+                spsCount = 0;
+                path = 2;
+            } else {
+                newAxis = ((sps[1].p - sps[0].p).Cross(newSupportPoint.p - sps[0].p)).Dir(outwards).Normalized();
+                spsCount = 0;
+                path = 3;
+            }
+        }
 
+        total++;
+        newSupportPoint = getSupport(tfa, tfb, hull, hull2, newAxis);
+        newDistance = { -newSupportPoint.p.Dot(newAxis), newAxis.Norm() };
+
+        if (bestDistance < newDistance) {
+            bestAxis = newAxis;
+            bestDistance = newDistance;
+            bestSupportPoint = newSupportPoint;
+            i = 0;
+        }
+ */
+
+    }
+    //printf("Total: %u\n", total);
     return bestSupportPoint;
 }
 
@@ -410,29 +461,42 @@ inline bool testVertexEdge(const Vec3 &v0, const Vec3 &v1) {
         -v0.Dot(v1 - v0) < 0;
 }
 
-void doGJK(const Transform &tfa, const Transform &tfb, const Hull &hull, const Hull &hull2, Simplex &s, Vec3 &axis) {
+int count4 = 0;
+int count3 = 0;
+int count2 = 0;
+
+int steps[20] = {0};
+
+void doGJK(const Transform &tfa, const Transform &tfb, const Hull &hull, const Hull &hull2, Simplex &s, Vec3 &axis, int iterations, Manifold &manifold) {
     float minDistance = FLT_MAX;
     
-    // TODO: Optimize, only calculate and test things once!
-
-    // TODO: Test if simplex is degenerate (determinant is small)
-
-    if (s.count == 0) {
-        axis = (tfb.pos - tfa.pos).Norm() < Physics::COLLISION_EPSILON_SQUARED ? tfb.pos - tfa.pos : Vec3(0,1,0);
-        s = { 1, getSupport(tfa, tfb, hull, hull2, axis) };
-    } else {
+    if (s.count != 0) {
         // Update support point world space coordinates
         for (size_t i = 0; i < s.count; ++i) {
             s[i].p = getSupport(tfa, tfb, hull, hull2, s[i].i, s[i].j);
         }
+        
+        // Check if simplex has become degenerate
+        switch (s.count) {
+            case 2: if ((s[1].p - s[0].p).Norm() < Physics::COLLISION_EPSILON_SQUARED) s.count = 0; break;
+            // TODO: EPA seems to be returning degenerate 3-simplices somtimes (lines)
+            case 3: if (faceNormal(s[0].p, s[1].p, s[2].p).Norm()< Physics::COLLISION_EPSILON_SQUARED) s.count = 0; break;
+        }
+    }
+
+    if (s.count == 0) {
+        // Initialize new simplex
+        axis = (tfb.pos - tfa.pos).Norm() < Physics::COLLISION_EPSILON_SQUARED ? tfb.pos - tfa.pos : Vec3(0,0,1);
+        s = { 1, getSupport(tfa, tfb, hull, hull2, axis) };
     }
     
     size_t i = 0;
-    for ( ;; ) {
+    for ( ;; i++) {
 
         // For each simplex level, keep the simplex if origo is inside, otherwise keep the subsimplex containing the closest point.
         switch (s.count) {
             case 4: {
+                count4++;
                 if (testVertexTetrahedron(s[0].p, s[1].p, s[2].p, s[3].p)) { s = {1, { s[0] }}; break; }
                 if (testVertexTetrahedron(s[1].p, s[2].p, s[3].p, s[0].p)) { s = {1, { s[1] }}; break; }
                 if (testVertexTetrahedron(s[2].p, s[3].p, s[0].p, s[1].p)) { s = {1, { s[2] }}; break; }
@@ -454,7 +518,8 @@ void doGJK(const Transform &tfa, const Transform &tfb, const Hull &hull, const H
                 return;
 
             } case 3: {
-            
+                count3++;
+
                 if (testVertexTriangle(s[0].p, s[1].p, s[2].p)) { s = {1, { s[0] }}; break; }
                 if (testVertexTriangle(s[1].p, s[2].p, s[0].p)) { s = {1, { s[1] }}; break; }
                 if (testVertexTriangle(s[2].p, s[0].p, s[1].p)) { s = {1, { s[2] }}; break; }
@@ -467,6 +532,7 @@ void doGJK(const Transform &tfa, const Transform &tfb, const Hull &hull, const H
                 break;
                 
             } case 2: {
+                count2++;
                 if (testVertexEdge(s[0].p, s[1].p)) { s = {1, { s[0] }}; break; }
                 if (testVertexEdge(s[1].p, s[0].p)) { s = {1, { s[1] }}; break; }
                 
@@ -474,7 +540,7 @@ void doGJK(const Transform &tfa, const Transform &tfb, const Hull &hull, const H
                 break;
             }
         }
-        
+
         switch(s.count) {
             case 1: axis = -s[0].p; break;
             case 2: axis = fromLinePerpendicularTowardsOrigo(s[0].p, s[1].p); break;
@@ -486,7 +552,8 @@ void doGJK(const Transform &tfa, const Transform &tfb, const Hull &hull, const H
         
         // Distance to closest point on simplex must be strictly decreasing unless we have found the best simplex
         // Make sure we make decent progress each step. Otherwise we are probably stuck in a loop.
-        if (minDistance * 0.95f <= distanceToSimplex) {
+        if (minDistance < distanceToSimplex) {
+            steps[i]++;
             return;
         } else {
             minDistance = distanceToSimplex;
@@ -501,12 +568,13 @@ void doGJK(const Transform &tfa, const Transform &tfb, const Hull &hull, const H
         for (int j = 0; j < s.count; ++j) {
             float d = (sp.p - s[j].p).Dot(axis);
             if (d * d < Physics::COLLISION_EPSILON_SQUARED * axis.Norm()) {
+                steps[i]++;
                 return;
             }
         }
 
         // Last resort, if we have started looping, return the current best simplex.
-        if (i++ > 20) {
+        if (i > 20) {
             assert(false);
         }
 
@@ -688,7 +756,7 @@ Physics::Physics() {
     temp.reserve(100);
 }
 
-void doContacts(Manifold &manifold) {
+void doContacts(Manifold &manifold, int iterations) {
 
     // TODO: keep a,b as pointers
     Body &a = *manifold.body[FIRST];
@@ -697,14 +765,14 @@ void doContacts(Manifold &manifold) {
     if ((a.sleepTimer > 0.0f || a.isFixed()) && (b.sleepTimer > 0.0f || b.isFixed())) {
         return;
     }
-    
+
     size_t contactsCount = 0;
     array<Contact, 8> contacts;
 
     Vec3 axis = manifold.axis;
-    
+
     Simplex s = manifold.simplex;
-    doGJK(a.transform, b.transform, a.hull, b.hull, s, axis);
+    doGJK(a.transform, b.transform, a.hull, b.hull, s, axis, iterations, manifold);
     SupportPoint sp = s[0];
 
     if (s.count == 4) {
@@ -715,15 +783,15 @@ void doContacts(Manifold &manifold) {
 
     if (s.count == 4) {
         axis = manifold.axis;
-        sp = findSeparatingAxis(a.transform, b.transform, a.hull, b.hull, axis);
+        sp = findSeparatingAxis(a.transform, b.transform, a.hull, b.hull, axis, manifold.sps, manifold.spsCount, manifold);
     }
+
+    axis.Normalize();
+    //axis = Vec3(0,0,1).Dir(b.transform.pos - a.transform.pos);
 
     manifold.axis = axis;
     manifold.simplex = s;
-    
-    axis.Normalize();
-    //axis = Vec3(0,0,1).Dir(b.transform.pos - a.transform.pos);
-    
+
     // find the collision plane in between the faces
     float distance = (-sp.p).Dot(axis);
     
@@ -883,7 +951,7 @@ void preSolveManifold(Manifold &manifold) {
         Vec3 vRel = calculateVelocity(b, contact.pos[SECOND]) - calculateVelocity(a, contact.pos[FIRST]);
         float velocity = vRel.Dot(contact.n[NORMAL]);
 
-        float frictionIncrease = 1.0f + 0.5f * ((a.sleepTimer > 0.0f || a.isFixed()) && (b.sleepTimer > 0.0f || b.isFixed()));
+        float frictionIncrease = 1.0f + 0.5f * ((a.sleepTimer > 0.0f || a.isFixed()) && (b.sleepTimer > 0.0f || b.isFixed()));
         contact.friction = sqrtf(a.friction * b.friction * frictionIncrease);
 
         float restitution = max(a.restitution, b.restitution);
@@ -916,6 +984,18 @@ void solveVelocities(Manifold &manifold, size_t iteration, float timeStep) {
 
     Body &a = *manifold.body[FIRST];
     Body &b = *manifold.body[SECOND];
+
+
+    if (a.velocity.Norm() < Physics::BODY_SLEEP_LINEAR_VELOCITY_THRESHOLD &&
+        a.angularVelocity.Norm() < Physics::BODY_SLEEP_ANGULAR_VELOCITY_THRESHOLD &&
+        b.velocity.Norm() < Physics::BODY_SLEEP_LINEAR_VELOCITY_THRESHOLD &&
+        b.angularVelocity.Norm() < Physics::BODY_SLEEP_ANGULAR_VELOCITY_THRESHOLD) {
+        a.velocity = 0;
+        a.angularVelocity = 0;
+        b.velocity = 0;
+        b.angularVelocity = 0;
+        return;
+    }
 
     for (int i = 0; i < Physics::MANIFOLD_SOLVER_ITERATIONS; ++i) {
         manifold.isFixed = manifold.contactsCount > 0;
@@ -970,6 +1050,20 @@ void solveVelocities(Manifold &manifold, size_t iteration, float timeStep) {
             applyImpulse(a, b, delta, contact.n[NORMAL], contact.inertia[FIRST][NORMAL], contact.inertia[SECOND][NORMAL]);
         }
     }
+
+    if (a.velocity.Norm() < Physics::BODY_SLEEP_LINEAR_VELOCITY_THRESHOLD) {
+        a.velocity = 0;
+    }
+    if (a.angularVelocity.Norm() < Physics::BODY_SLEEP_ANGULAR_VELOCITY_THRESHOLD) {
+        a.angularVelocity = 0;
+    }
+    if (b.velocity.Norm() < Physics::BODY_SLEEP_LINEAR_VELOCITY_THRESHOLD) {
+        b.velocity = 0;
+    }
+    if (b.angularVelocity.Norm() < Physics::BODY_SLEEP_ANGULAR_VELOCITY_THRESHOLD) {
+        b.angularVelocity = 0;
+    }
+
 }
 
 void solvePosition(Manifold &manifold) {
@@ -983,13 +1077,13 @@ void solvePosition(Manifold &manifold) {
             float distance = dRel.Dot(contact.n[NORMAL]);
             const float targetDistance = 0.0f;
 
-            float correction = (targetDistance - distance) * contact.mass[NORMAL];
+            float correction = 0.8f * (targetDistance - distance) * contact.mass[NORMAL];
             float sum = correction + contact.correction;
             
             // Pull objects apart if there is penetration and pull objects toghether
-            // to make surfaces alignt. Never pull the surfaces toghether unless there is
+            // to make surfaces align. Only pull the surfaces toghether when there is
             // an impulse in the normal direction to avoid objects sticking together like glue.
-            float clampedCorrection = max(sum, min(0.0f, -contact.impulse[NORMAL] * contact.mass[NORMAL]));
+            float clampedCorrection = max(sum, 0.0f); //min(0.0f, 100.0f * -contact.impulse[NORMAL] * contact.mass[NORMAL]));
             
             contact.correction = clampedCorrection;
             float delta = clampedCorrection - oldCorrection;
@@ -1173,9 +1267,13 @@ void Physics::drawManifolds() {
             
             int color = color2;
             
-            drawPoint(color, a->transform * contact.pos0[FIRST], 15.0f);
-            drawPoint(color, b->transform * contact.pos0[SECOND], 15.0f);
+            // drawPoint(color, a->transform * contact.pos0[FIRST], 15.0f);
+            // drawPoint(color, b->transform * contact.pos0[SECOND], 15.0f);
         }
+
+//        drawLine(a->transform.pos, a->transform.pos + manifold.axis * 5, 0x00FFFFFF, 2.0f);
+//        drawLine(b->transform.pos, b->transform.pos - manifold.axis * 5, 0x00FFFFFF, 2.0f);
+        
     }
 }
 
@@ -1247,7 +1345,7 @@ void Physics::step(float timeStep, const Physics::CollisionCallbacks &callback) 
         Body* a = it->body[FIRST];
         Body* b = it->body[SECOND];
         
-        if(!(a->isFixed() && b->isFixed()) && !testBroadPhaseProximity(a, b, timeStep)) {
+        if(!(a->isFixed() && b->isFixed()) && (a->isAwake || b->isAwake) && !testBroadPhaseProximity(a, b, timeStep)) {
             a->proxmimities.remove(b);
             b->proxmimities.remove(a);
             a->manifolds.remove(&(*it));
@@ -1267,7 +1365,7 @@ void Physics::step(float timeStep, const Physics::CollisionCallbacks &callback) 
     for (auto &manifold : manifolds) {
 
         if (!manifold.ignoreContacts) {
-            doContacts(manifold);
+            doContacts(manifold, iterations);
         }
 
         // Call the callbacks
@@ -1362,7 +1460,7 @@ void Physics::step(float timeStep, const Physics::CollisionCallbacks &callback) 
                     auto &contact = manifold->contacts[i];
                     for (int n = NORMAL; n <= BINORMAL; n++) {
 
-                        if (!a->isFixed()) {
+                        if (!a->isFixed() && a->isAwake) {
                             float velocityA = contact.impulse[n] * a->invMass;
                             Vec3 angularVelocityA = contact.impulse[n] * contact.inertia[FIRST][n];
 
@@ -1370,7 +1468,7 @@ void Physics::step(float timeStep, const Physics::CollisionCallbacks &callback) 
                             a->totalAngularVelocity += angularVelocityA.Norm();
                         }
 
-                        if (!b->isFixed()) {
+                        if (!b->isFixed() && b->isAwake) {
                             float velocityB = contact.impulse[n] * b->invMass;
                             Vec3 angularVelocityB = contact.impulse[n] * contact.inertia[SECOND][n];
 
@@ -1391,13 +1489,13 @@ void Physics::step(float timeStep, const Physics::CollisionCallbacks &callback) 
                     body->sleepTimer = isNotMoving && isNotRotating ? body->sleepTimer + timeStep : 0;
                     sleepTimer = min(sleepTimer, body->sleepTimer);
                 }
-
+/*
                 if (sleepTimer > 60.0f) {
                     for(auto* body : islandBodies) {
                         body->isAwake = false;
                     }
                 }
-
+*/
             }
         }
     }
@@ -1405,10 +1503,10 @@ void Physics::step(float timeStep, const Physics::CollisionCallbacks &callback) 
     // Update positions
     for (auto &body : bodies) {
         if (!body.isFixed()) {
-            body.velocity *= max(0.7f, min(1.0f, 10.0f * sqrt(body.velocity.Norm() / body.totalVelocity)));
+            //body.velocity *= max(0.7f, min(1.0f, 10.0f * sqrt(body.velocity.Norm() / body.totalVelocity)));
             body.transform.pos += body.velocity * timeStep;
             
-            body.angularVelocity *= max(0.7f, min(1.0f, 10.0f * sqrt(body.angularVelocity.Norm() / body.totalAngularVelocity)));
+            //body.angularVelocity *= max(0.7f, min(1.0f, 10.0f * sqrt(body.angularVelocity.Norm() / body.totalAngularVelocity)));
             body.transform.rot = 0.5f * timeStep * Ternion(body.angularVelocity) * body.transform.rot;
         }
     }
@@ -1416,6 +1514,13 @@ void Physics::step(float timeStep, const Physics::CollisionCallbacks &callback) 
     // Position Solver
     for (int k = 0; k < POSITION_SOLVER_ITERATIONS; k++) {
         for (auto &manifold : manifolds) {
+            auto a = manifold.body[FIRST];
+            auto b = manifold.body[SECOND];
+
+            if ((a->sleepTimer > 60.0f || a->isFixed()) && (b->sleepTimer > 60.0f || b->isFixed())) {
+                continue;
+            }
+
             solvePosition(manifold);
         }
     }

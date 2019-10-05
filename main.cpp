@@ -250,7 +250,7 @@ void display() {
         draw(body);
     }
 
-//    physics.drawManifolds();
+    physics.drawManifolds();
 
 //    physics.drawDebug();
 
@@ -262,6 +262,15 @@ sf::RenderWindow window;
 
 bool mouseLeftButton = false;
 
+Body* getNth(int index) {
+    auto it = physics.bodies.begin();
+    for (int i = 0; i < index; i++) {
+        it++;
+    }
+    
+    return &(*it);
+}
+
 // EVENTS
 void doEvents() {
     sf::Event event;
@@ -271,32 +280,31 @@ void doEvents() {
         if (event.type == sf::Event::Closed) {
             window.close();
         } else if (event.type == sf::Event::KeyPressed) {
-        /*
             if (event.key.code == sf::Keyboard::W) {
-                physics.bodies[currentBoxIndex].transform.pos += UP * 0.1f;
+                getNth(currentBoxIndex)->transform.pos += UP * 0.1f;
             } else if (event.key.code == sf::Keyboard::X) {
-                physics.bodies[currentBoxIndex].transform.pos += DOWN * 0.1f;
+                getNth(currentBoxIndex)->transform.pos += DOWN * 0.1f;
             } else if (event.key.code == sf::Keyboard::A) {
-                physics.bodies[currentBoxIndex].transform.pos += LEFT * 0.1f;
+                getNth(currentBoxIndex)->transform.pos += LEFT * 0.1f;
             } else if (event.key.code == sf::Keyboard::D) {
-                physics.bodies[currentBoxIndex].transform.pos += RIGHT * 0.1f;
+                getNth(currentBoxIndex)->transform.pos += RIGHT * 0.1f;
             } else if (event.key.code == sf::Keyboard::R) {
-                physics.bodies[currentBoxIndex].transform.pos += FORWARD * 0.1f;
+                getNth(currentBoxIndex)->transform.pos += FORWARD * 0.1f;
             } else if (event.key.code == sf::Keyboard::V) {
-                physics.bodies[currentBoxIndex].transform.pos += BACK * 0.1f;
+                getNth(currentBoxIndex)->transform.pos += BACK * 0.1f;
             } else if (event.key.code == sf::Keyboard::Num1) {
-                physics.bodies[currentBoxIndex].transform.rot *= Ternion(0.1f, 0, 0);
+                getNth(currentBoxIndex)->transform.rot *= Ternion(0.1f, 0, 0);
             } else if (event.key.code == sf::Keyboard::Num3) {
-                physics.bodies[currentBoxIndex].transform.rot *= Ternion(-0.1f, 0, 0);
+                getNth(currentBoxIndex)->transform.rot *= Ternion(-0.1f, 0, 0);
             } else if (event.key.code == sf::Keyboard::Q) {
-                physics.bodies[currentBoxIndex].transform.rot *= Ternion(0, 0.1f, 0);
+                getNth(currentBoxIndex)->transform.rot *= Ternion(0, 0.1f, 0);
             } else if (event.key.code == sf::Keyboard::E) {
-                physics.bodies[currentBoxIndex].transform.rot *= Ternion(0, -0.1f, 0);
+                getNth(currentBoxIndex)->transform.rot *= Ternion(0, -0.1f, 0);
             } else if (event.key.code == sf::Keyboard::Z) {
-                physics.bodies[currentBoxIndex].transform.rot *= Ternion(0, 0, 0.1f);
+                getNth(currentBoxIndex)->transform.rot *= Ternion(0, 0, 0.1f);
             } else if (event.key.code == sf::Keyboard::C) {
-                physics.bodies[currentBoxIndex].transform.rot *= Ternion(0, 0, -0.1f);
-            } else */if (event.key.code == sf::Keyboard::B) {
+                getNth(currentBoxIndex)->transform.rot *= Ternion(0, 0, -0.1f);
+            } else if (event.key.code == sf::Keyboard::B) {
                 currentBoxIndex = !currentBoxIndex;
             } else if (event.key.code == sf::Keyboard::P) {
                 physics.setPaused(paused = !paused);
@@ -326,7 +334,11 @@ void doEvents() {
             } else if (event.key.code == sf::Keyboard::J) {
                 camera.distance *= 1.05f;
             } else if (event.key.code == sf::Keyboard::Comma) {
+                physics.iterations = max(physics.iterations - 1, 0);
+                printf("iterations: %d\n", physics.iterations);
             } else if (event.key.code == sf::Keyboard::Period) {
+                physics.iterations = min(physics.iterations + 1, 20);
+                printf("iterations: %d\n", physics.iterations);
             } else if (event.key.code == sf::Keyboard::Num0) {
                 std::random_device rng;
                 std::mt19937 urng(rng());
