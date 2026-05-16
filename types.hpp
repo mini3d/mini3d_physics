@@ -11,6 +11,7 @@
 #include <vector>
 #include <unordered_set>
 #include <list>
+#include <cstdint>
 #include <cfloat>
 
 namespace mini3d {

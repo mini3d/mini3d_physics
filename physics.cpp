@@ -16,9 +16,10 @@
 #include <unordered_set>
 #include <iostream>
 #include <string>
+#include <cassert>
 
 // TODO: Remove
-#include <GLUT/glut.h>
+#include <GL/glut.h>
 
 
 // TODO: There is some bug with fricition that makes the objects sway, float around an such.
@@ -180,7 +181,7 @@ struct Fraction {
     float norm;
 
     inline bool operator <(const Fraction &o) const {
-        return distance * abs(distance) * o.norm < o.distance * abs(o.distance) * norm;
+        return distance * std::fabs(distance) * o.norm < o.distance * std::fabs(o.distance) * norm;
     }
 };
 
@@ -622,7 +623,7 @@ void polygonPolygonClipping(Vec3 *sub, size_t &subCount, Vec3 *ref, size_t &refC
             // If start and end point are on different sides of the clipping edge,
             // add the clipping plane intersection point to the output
             if (dStart * dEnd < 0) {
-                tmp[tmpCount++] = Vec3::Interpolated(start, end, abs(dStart), abs(dEnd));
+                tmp[tmpCount++] = Vec3::Interpolated(start, end, std::fabs(dStart), std::fabs(dEnd));
             }
         
             // If end point is inside polygon, add it to the output
@@ -966,7 +967,7 @@ void solveVelocities(Manifold &manifold, size_t iteration, float timeStep) {
                 float impulse = (targetVelocity - velocity) * contact.mass[n];
 
                 float sum = impulse + contact.impulse[n] * 0.99f;
-                if (abs(sum) > maxFriction || abs(sum) > maxFriction) {
+                if (std::fabs(sum) > maxFriction || std::fabs(sum) > maxFriction) {
                     manifold.isFixed = false;
                 }
 
@@ -1209,7 +1210,7 @@ void Physics::drawManifolds() {
         auto b = manifold.body[SECOND];
         for (int i = 0; i < manifold.contactsCount; i++) {
             auto &contact = manifold.contacts[i];
-            int intensity = max(min(255, (int)(abs(contact.distance * 10.0f))), 0);
+            int intensity = max(min(255, (int)(std::fabs(contact.distance * 10.0f))), 0);
             int color2 = (intensity << 16) + (intensity << 8) + (intensity << 24);
             /*
             int color = ((int)(max(0.0f, contact.impulse[NORMAL]) * 100000.0f)) << 16;
@@ -1237,7 +1238,7 @@ void Physics::drawDebug() {
         auto b = manifold.body[SECOND];
         for (int i = 0; i < manifold.contactsCount; i++) {
             auto &contact = manifold.contacts[i];
-            int intensity = max(min(255, (int)(abs(contact.impulse[NORMAL]) * 100000.0f)), 0);
+            int intensity = max(min(255, (int)(std::fabs(contact.impulse[NORMAL]) * 100000.0f)), 0);
             int color2 = (intensity << 16) + (intensity << 8) + (intensity << 24);
             /*
             int color = ((int)(max(0.0f, contact.impulse[NORMAL]) * 100000.0f)) << 16;

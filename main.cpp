@@ -6,8 +6,10 @@
 #include <vector>
 
 #include <SFML/Graphics.hpp>
-#include "external/imgui/imgui.h"
-#include "external/imgui/imgui-SFML.h"
+#include <SFML/Window/Event.hpp>
+#include <imgui.h>
+#include <imgui-SFML.h>
+#include <optional>
 #include "transform.hpp"
 #include "geometry.hpp"
 #include "physics.hpp"
@@ -175,11 +177,10 @@ std::string current_item = items[0];
 
 void displayImgui() {
     // Create a window called "My First Tool", with a menu bar.
-    ImGui::SetNextWindowContentWidth(400);
+    ImGui::SetNextWindowContentSize(ImVec2(400, 0));
     ImGui::Begin("My First Tool", &my_tool_active, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground);
     ImGui::SetWindowPos(ImVec2(0, 0));
-    
-    ImGui::SetNextWindowContentWidth(400);
+    ImGui::SetNextItemWidth(400);
     if (ImGui::BeginCombo("##combo", current_item.c_str())) {
         for (int n = 0; n < items.size(); n++) {
             bool is_selected = (current_item == items[n]); // You can store your selection however you want, outside or inside your objects
@@ -273,48 +274,49 @@ Body* getNth(int index) {
 
 // EVENTS
 void doEvents() {
-    sf::Event event;
-    while (window.pollEvent(event)) {
-        ImGui::SFML::ProcessEvent(event);
+    using Key = sf::Keyboard::Key;
+    while (const std::optional<sf::Event> event = window.pollEvent()) {
+        ImGui::SFML::ProcessEvent(window, *event);
 
-        if (event.type == sf::Event::Closed) {
+        if (event->is<sf::Event::Closed>()) {
             window.close();
-        } else if (event.type == sf::Event::KeyPressed) {
-            if (event.key.code == sf::Keyboard::W) {
+        } else if (const auto* keyEv = event->getIf<sf::Event::KeyPressed>()) {
+            const auto code = keyEv->code;
+            if (code == Key::W) {
                 getNth(currentBoxIndex)->transform.pos += UP * 0.1f;
-            } else if (event.key.code == sf::Keyboard::X) {
+            } else if (code == Key::X) {
                 getNth(currentBoxIndex)->transform.pos += DOWN * 0.1f;
-            } else if (event.key.code == sf::Keyboard::A) {
+            } else if (code == Key::A) {
                 getNth(currentBoxIndex)->transform.pos += LEFT * 0.1f;
-            } else if (event.key.code == sf::Keyboard::D) {
+            } else if (code == Key::D) {
                 getNth(currentBoxIndex)->transform.pos += RIGHT * 0.1f;
-            } else if (event.key.code == sf::Keyboard::R) {
+            } else if (code == Key::R) {
                 getNth(currentBoxIndex)->transform.pos += FORWARD * 0.1f;
-            } else if (event.key.code == sf::Keyboard::V) {
+            } else if (code == Key::V) {
                 getNth(currentBoxIndex)->transform.pos += BACK * 0.1f;
-            } else if (event.key.code == sf::Keyboard::Num1) {
+            } else if (code == Key::Num1) {
                 getNth(currentBoxIndex)->transform.rot *= Ternion(0.1f, 0, 0);
-            } else if (event.key.code == sf::Keyboard::Num3) {
+            } else if (code == Key::Num3) {
                 getNth(currentBoxIndex)->transform.rot *= Ternion(-0.1f, 0, 0);
-            } else if (event.key.code == sf::Keyboard::Q) {
+            } else if (code == Key::Q) {
                 getNth(currentBoxIndex)->transform.rot *= Ternion(0, 0.1f, 0);
-            } else if (event.key.code == sf::Keyboard::E) {
+            } else if (code == Key::E) {
                 getNth(currentBoxIndex)->transform.rot *= Ternion(0, -0.1f, 0);
-            } else if (event.key.code == sf::Keyboard::Z) {
+            } else if (code == Key::Z) {
                 getNth(currentBoxIndex)->transform.rot *= Ternion(0, 0, 0.1f);
-            } else if (event.key.code == sf::Keyboard::C) {
+            } else if (code == Key::C) {
                 getNth(currentBoxIndex)->transform.rot *= Ternion(0, 0, -0.1f);
-            } else if (event.key.code == sf::Keyboard::B) {
+            } else if (code == Key::B) {
                 currentBoxIndex = !currentBoxIndex;
-            } else if (event.key.code == sf::Keyboard::P) {
+            } else if (code == Key::P) {
                 physics.setPaused(paused = !paused);
-            } else if (event.key.code == sf::Keyboard::S) {
+            } else if (code == Key::S) {
                 if (paused) {
                     physics.setPaused(false);
                     physics.step(1.0f, callback);
                     physics.setPaused(true);
                 }
-            } else if (event.key.code == sf::Keyboard::Y) {
+            } else if (code == Key::Y) {
                 if (physics.joints.size() > 0) {
                     physics.joints.clear();
                 } else {
@@ -329,80 +331,64 @@ void doEvents() {
                     }
                 }
                 break;
-            } else if (event.key.code == sf::Keyboard::H) {
+            } else if (code == Key::H) {
                 camera.distance *= 0.95f;
-            } else if (event.key.code == sf::Keyboard::J) {
+            } else if (code == Key::J) {
                 camera.distance *= 1.05f;
-            } else if (event.key.code == sf::Keyboard::Comma) {
+            } else if (code == Key::Comma) {
                 physics.iterations = max(physics.iterations - 1, 0);
                 printf("iterations: %d\n", physics.iterations);
-            } else if (event.key.code == sf::Keyboard::Period) {
+            } else if (code == Key::Period) {
                 physics.iterations = min(physics.iterations + 1, 20);
                 printf("iterations: %d\n", physics.iterations);
-            } else if (event.key.code == sf::Keyboard::Num0) {
-                std::random_device rng;
-                std::mt19937 urng(rng());
-                std::uniform_real_distribution<> dist(-0.05f,0.05f);
+            } else if (code == Key::Num0) {
                 Box box(Vec3(0.4f, 0.4f, 0.4f));
-                //box.transform.pos = Vec3(0.8f + dist(rng), 0 + dist(rng), 5.0f);
                 box.transform.pos = Vec3(0.0f, 0, 5.0f);
                 box.velocity = Vec3(0.0f, 0, 0);
                 physics.add(box);
-            } else if (event.key.code == sf::Keyboard::Num9) {
+            } else if (code == Key::Num9) {
                 Box box(Vec3(0.2f, 2.0f, 0.2f));
                 box.transform.pos = Vec3(0.0f, -3.0, 2.0f);
                 box.velocity = Vec3(0.0f, 0.2f, -0.05f);
                 physics.add(box);
             }
-
-        } else if (event.type == sf::Event::MouseButtonPressed) {
-            if (event.mouseButton.button == sf::Mouse::Left) {
+        } else if (const auto* mb = event->getIf<sf::Event::MouseButtonPressed>()) {
+            if (mb->button == sf::Mouse::Button::Left) {
                 mouseLeftButton = true;
             }
-        } else if (event.type == sf::Event::MouseButtonReleased) {
-            if (event.mouseButton.button == sf::Mouse::Left) {
+        } else if (const auto* mb = event->getIf<sf::Event::MouseButtonReleased>()) {
+            if (mb->button == sf::Mouse::Button::Left) {
                 mouseLeftButton = false;
             }
-        } else if (event.type == sf::Event::MouseMoved) {
+        } else if (const auto* mm = event->getIf<sf::Event::MouseMoved>()) {
             if (mouseLeftButton) {
-                camera.rotationZ -= (event.mouseMove.x - xOld) / 100.0f;
-                camera.rotationX -= (event.mouseMove.y - yOld) / 100.0f;
+                camera.rotationZ -= (mm->position.x - xOld) / 100.0f;
+                camera.rotationX -= (mm->position.y - yOld) / 100.0f;
             }
-
-            xOld = event.mouseMove.x;
-            yOld = event.mouseMove.y;
-        } else if (event.type == sf::Event::MouseWheelMoved) {
-            camera.distance = pow(camera.distance, 1 - event.mouseWheel.delta * 0.01f);
-        } else if (event.type == sf::Event::Resized) {
-            camera.windowX = event.size.width;
-            camera.windowY = event.size.height;
+            xOld = mm->position.x;
+            yOld = mm->position.y;
+        } else if (const auto* mw = event->getIf<sf::Event::MouseWheelScrolled>()) {
+            camera.distance = pow(camera.distance, 1 - mw->delta * 0.01f);
+        } else if (const auto* rs = event->getIf<sf::Event::Resized>()) {
+            camera.windowX = static_cast<int>(rs->size.x);
+            camera.windowY = static_cast<int>(rs->size.y);
             glViewport(0, 0, camera.windowX, camera.windowY);
         }
     }
 }
 
 int main (int argc, char **argv) {
-/*
-    Quat quaternion = Quat::FromAxisAngle(0, 1, 0, 3.1416f * 0.5f);
-    Ternion ternion = Ternion::FromAxisAngle(0, 1, 0, 3.1416f * 0.5f);
-    Tensor tensor(ternion);
-    
-    Vec3 vector(0.77,1.32,-0.32);
-    
-    Vec3 rotatedTernion = ternion * vector;
-    Vec3 rotatedTensor = tensor * vector;
-    Vec3 rotatedQuaternion = quaternion.Transform(vector);
-    
-    printf("rotated ternion: %.*e, %.*e, %.*e\n", rotatedTernion[0], rotatedTernion[1], rotatedTernion[2]);
-    printf("rotated tensor: %.*e, %.*e, %.*e\n", rotatedTensor[0], rotatedTensor[1], rotatedTensor[2]);
-    printf("rotated quaternion: %.*e, %.*e, %.*e\n", rotatedQuaternion[0], rotatedQuaternion[1], rotatedQuaternion[2]);
-*/
-
     loadEmptyScene();
 
-    window.create(sf::VideoMode(camera.windowX, camera.windowY), "Mini3d Physics", sf::Style::Default, sf::ContextSettings(32));
+    sf::ContextSettings ctx;
+    ctx.depthBits = 24;
+    window.create(sf::VideoMode({static_cast<unsigned>(camera.windowX), static_cast<unsigned>(camera.windowY)}),
+                  "Mini3d Physics", sf::Style::Default, sf::State::Windowed, ctx);
     window.setFramerateLimit(60);
-    ImGui::SFML::Init(window);
+    if (!ImGui::SFML::Init(window)) {
+        std::cerr << "ImGui::SFML::Init failed" << std::endl;
+        return 1;
+    }
 
     sf::Clock deltaClock;
     while (window.isOpen()) {
@@ -424,7 +410,7 @@ int main (int argc, char **argv) {
         sf::sleep(sf::seconds(0.01f));
     };
 
-    ImGui::DestroyContext();
+    ImGui::SFML::Shutdown();
 
     return 0;
 }

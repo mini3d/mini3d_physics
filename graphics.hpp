@@ -1,7 +1,7 @@
 #ifndef graphics_h
 #define graphics_h
 
-#include <GLUT/glut.h>
+#include <GL/glut.h>
 #include "transform.hpp"
 #include "types.hpp"
 

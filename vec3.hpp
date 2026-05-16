@@ -56,7 +56,7 @@ public:
     inline void Negate()                                                { x = -x; y = -y; z = -z; }
     inline float Norm() const                                           { return x*x + y*y + z*z; }
     inline float Length() const                                         { return sqrt(Norm()); }
-    inline float RectilinearDistance() const                            { return abs(x) + abs(y) + abs(z); }
+    inline float RectilinearDistance() const                            { return std::fabs(x) + std::fabs(y) + std::fabs(z); }
     inline float Distance(const Vec3 &v) const                          { return (*this - v).Length(); }
     inline float SquareDistance(const Vec3 &v) const                    { return (*this - v).Norm(); }
     inline Vec3& Normalize()                                            { *this /= Length(); return *this; }

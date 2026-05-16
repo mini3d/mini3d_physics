@@ -49,7 +49,7 @@ static bool raySphereIntersection(const Ray &ray, const Vec3 sphereCenter, const
 
 static inline float rayPlaneIntersectionDistance(const Ray &ray, const Face &plane) {
     float rayDotPlane = ray.direction.Dot(plane.normal);
-    return (abs(rayDotPlane) < 0.00001f) ? FLT_MAX : (plane.pos - ray.origin).Dot(plane.normal) / rayDotPlane;
+    return (std::fabs(rayDotPlane) < 0.00001f) ? FLT_MAX : (plane.pos - ray.origin).Dot(plane.normal) / rayDotPlane;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -61,7 +61,7 @@ static inline float rayPlaneIntersectionDistance(const Ray &ray, const Face &pla
 // From Erin Catto http://box2d.org/2014/02/computing-a-basis/
 // Use normal CROSS tangent to get the binormal
 static inline Vec3 getTangent(const Vec3& normal) {
-    return ((abs(normal.x) >= 0.57735f) ?
+    return ((std::fabs(normal.x) >= 0.57735f) ?
             Vec3(normal.y, -normal.x, 0.0f) :
             Vec3(0.0f, normal.z, -normal.y)).Normalized();
 }

@@ -61,7 +61,7 @@ if (contactsCount > 0) {
                 float impulse = (targetVelocity - velocity) * contact.mass[n];
 
                 float sum = impulse + contact.impulse[n];
-                if (abs(sum) > maxFriction || abs(sum) > maxFriction) {
+                if (std::fabs(sum) > maxFriction || std::fabs(sum) > maxFriction) {
                     manifold.isFixed = false;
                 }
 

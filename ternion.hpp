@@ -49,7 +49,7 @@ public:
                                                                                   return Ternion(x + q.x + y * q.z - z * q.y,
                                                                                               y + q.y + z * q.x - x * q.z,
                                                                                               z + q.z + x * q.y - y * q.x) *
-                                                                                              (abs(s) < 0.001f ? 1.0f / 0.00001f : 1.0f / s); }
+                                                                                              (std::fabs(s) < 0.001f ? 1.0f / 0.00001f : 1.0f / s); }
 
     inline const Ternion operator *=(const Ternion &q)                          { return *this = *this * q; }
     inline const Ternion operator +=(const Ternion &q)                          { return *this = *this + q; }
